@@ -1,10 +1,10 @@
 /**
- * IWSDKInputProvider — feeds Meta IWSDK's input machinery into the shared
+ * IWSDKInputProvider - feeds Meta IWSDK's input machinery into the shared
  * input contracts, in place of the standalone WebXR provider.
  *
  * Poses come from the IWSDK player rig (`world.playerSpaceEntities`:
  * ray/grip/index-tip spaces, head), signals from the stateful XR gamepads
- * (`world.input.xr.gamepads` — analog trigger/squeeze with `getSelecting`
+ * (`world.input.xr.gamepads` - analog trigger/squeeze with `getSelecting`
  * fallback, which also covers hand pinch). Capabilities derive from the
  * LIVE session and re-publish on visibility/input-source changes.
  *

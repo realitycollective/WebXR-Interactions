@@ -1,5 +1,5 @@
 /**
- * The playground stations — the SAME control set proven in the Pale Signal
+ * The playground stations - the SAME control set proven in the Pale Signal
  * research, expressed as a portable InteractionDescriptor plus per-station
  * three.js mesh builders. Any adapter can rebuild this playground from the
  * same descriptor; only the mesh builders are engine-specific.

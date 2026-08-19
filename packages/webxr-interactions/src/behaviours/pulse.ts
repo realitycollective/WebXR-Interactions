@@ -1,5 +1,5 @@
 /**
- * Pulse — an additive press effect: a decaying scale + emissive flash on
+ * Pulse - an additive press effect: a decaying scale + emissive flash on
  * actuation. Composes with any motion behaviour on the same interactable
  * (multiple behaviours per object, the pale-signal beacon pattern).
  */

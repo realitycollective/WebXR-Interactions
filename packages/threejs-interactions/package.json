@@ -1,7 +1,7 @@
 {
   "name": "@realitycollective/threejs-interactions",
   "version": "0.1.0",
-  "description": "The default, standalone engine adapter for the Reality Collective Interaction Extensions: raw WebXR (the browser's OpenXR binding — XRSession, XRInputSource, select/squeeze, hand joints) plus three.js hit-testing and transform ports, with a desktop mouse fallback. No framework required. Re-exports the @realitycollective/webxr-interactions core.",
+  "description": "The default, standalone engine adapter for the Reality Collective Interaction Extensions: raw WebXR (the browser's OpenXR binding - XRSession, XRInputSource, select/squeeze, hand joints) plus three.js hit-testing and transform ports, with a desktop mouse fallback. No framework required. Re-exports the @realitycollective/webxr-interactions core.",
   "keywords": ["realitycollective", "webxr", "threejs", "xr", "interaction", "input", "openxr"],
   "license": "MIT",
   "author": "Reality Collective",

@@ -1,5 +1,5 @@
 /**
- * Dial — a twistable knob. `handDriven`: while held, the hand's bearing
+ * Dial - a twistable knob. `handDriven`: while held, the hand's bearing
  * around the dial axis accumulates a clamped rotation `[0, maxAngle]`;
  * publishes `normalize01(angle, maxAngle)`. Works from any provider that
  * can grab and report a hand/grip position (the research prototype's

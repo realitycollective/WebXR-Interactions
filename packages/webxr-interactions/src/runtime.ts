@@ -1,8 +1,8 @@
 /**
- * InteractionRuntime — the engine-free orchestrator.
+ * InteractionRuntime - the engine-free orchestrator.
  *
  * Once per host frame the runtime pulls the input provider, resolves
- * targeting (provider hints first — provider power wins — then poke
+ * targeting (provider hints first - provider power wins - then poke
  * proximity, then ray hits), applies press/grab transitions with
  * hysteresis, runs gaze gating + dwell, ticks every behaviour, and emits
  * interaction events and feedback intents. It never touches an engine:
@@ -216,7 +216,7 @@ export class InteractionRuntime {
     return this.feedbackEmitter.subscribe(listener);
   }
 
-  /** Sampled sources for this frame — the UI Extensions pointer bridge hook. */
+  /** Sampled sources for this frame - the UI Extensions pointer bridge hook. */
   onSourcesSampled(listener: (sources: readonly InputSourceSnapshot[]) => void): Unsubscribe {
     return this.afterSample.subscribe(listener);
   }

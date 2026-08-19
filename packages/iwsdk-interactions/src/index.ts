@@ -1,5 +1,5 @@
 /**
- * @realitycollective/iwsdk-interactions — the Meta IWSDK adapter.
+ * @realitycollective/iwsdk-interactions - the Meta IWSDK adapter.
  * Re-exports the engine-free core wholesale; apps depend on exactly this
  * package.
  */

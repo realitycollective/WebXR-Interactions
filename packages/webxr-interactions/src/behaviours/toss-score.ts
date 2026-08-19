@@ -1,5 +1,5 @@
 /**
- * TossScore — attach to a hoop/goal; scores registered target objects that
+ * TossScore - attach to a hoop/goal; scores registered target objects that
  * pass through its plane in the scoring direction. Scoring is geometric
  * and engine-free; how the object gets thrown (native physics, poseOnly
  * carry + client ballistics) is not this behaviour's concern.

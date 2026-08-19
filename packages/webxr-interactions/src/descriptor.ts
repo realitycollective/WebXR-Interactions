@@ -1,8 +1,8 @@
 /**
- * InteractionDescriptor — the portable scene-interaction format. Plain
+ * InteractionDescriptor - the portable scene-interaction format. Plain
  * JSON-able data: which interactables exist, which behaviours they carry
  * (with tuning), and their gaze policy. Every adapter builds the SAME
- * playground from the same descriptor — the portability proof inherited
+ * playground from the same descriptor - the portability proof inherited
  * from the UI Extensions' SceneDescriptor.
  */
 import type { BehaviourConfig } from "./behaviours/factory.js";

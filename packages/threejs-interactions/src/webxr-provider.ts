@@ -1,5 +1,5 @@
 /**
- * WebXRInputProvider — the standalone, framework-free input provider.
+ * WebXRInputProvider - the standalone, framework-free input provider.
  *
  * Speaks the browser's OpenXR binding directly: `XRSession` input sources
  * (`targetRaySpace`, `gripSpace`, `hand` joints), `selectstart/selectend`
@@ -25,7 +25,7 @@ import {
 export interface WebXRProviderContext {
   /** three.js `renderer.xr` (or anything with the same session surface). */
   xr: Pick<WebXRManager, "getSession" | "getReferenceSpace" | "getFrame">;
-  /** The rendering camera — head pose in XR, pointer projection on desktop. */
+  /** The rendering camera - head pose in XR, pointer projection on desktop. */
   camera: Camera;
   /** DOM element for the desktop mouse fallback (canvas). Omit to disable. */
   domElement?: HTMLElement;

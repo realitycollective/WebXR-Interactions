@@ -1,8 +1,8 @@
 /**
- * Press — a mechanical button. `driven`: the behaviour owns the transform,
+ * Press - a mechanical button. `driven`: the behaviour owns the transform,
  * integrating an underdamped spring toward the logical target so the button
  * visibly depresses, overshoots and settles (the pale-signal bounce).
- * Supports momentary (default) and latching modes — latching is finally
+ * Supports momentary (default) and latching modes - latching is finally
  * reachable from data, unlike the research prototype.
  */
 import type { Vec3Tuple } from "@realitycollective/webxr-input";

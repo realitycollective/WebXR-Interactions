@@ -1,7 +1,7 @@
 {
   "name": "@realitycollective/webxr-interactions",
   "version": "0.1.0",
-  "description": "Engine-free core of the Reality Collective Interaction Extensions: interactables, interactors, behaviours (press, hinge, dial, slide, grab, toss-scoring, pulse, gaze-dwell), capability negotiation and feedback hooks — driven through the shared @realitycollective/webxr-input contracts. Pair with an engine adapter: threejs-interactions, iwsdk-interactions or xrblocks-interactions.",
+  "description": "Engine-free core of the Reality Collective Interaction Extensions: interactables, interactors, behaviours (press, hinge, dial, slide, grab, toss-scoring, pulse, gaze-dwell), capability negotiation and feedback hooks - driven through the shared @realitycollective/webxr-input contracts. Pair with an engine adapter: threejs-interactions, iwsdk-interactions or xrblocks-interactions.",
   "keywords": ["realitycollective", "webxr", "xr", "interaction", "input"],
   "license": "MIT",
   "author": "Reality Collective",

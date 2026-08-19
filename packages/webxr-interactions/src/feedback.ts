@@ -1,11 +1,11 @@
 /**
- * Feedback hooks — haptics/audio stay OUT of the framework; the client
+ * Feedback hooks - haptics/audio stay OUT of the framework; the client
  * implements them. Behaviours emit *intents* describing the physical
  * moment ("this press just actuated, a short strong pulse would fit");
  * the client subscribes and realises them however it likes (haptic pulse
  * on controllers, an audio cue, both, neither).
  *
- * `routeHapticsToProvider` is the one convenience the framework offers —
+ * `routeHapticsToProvider` is the one convenience the framework offers -
  * an explicit opt-in the client calls, never an automatic behaviour.
  */
 import type { InputProvider, Unsubscribe } from "@realitycollective/webxr-input";
@@ -26,7 +26,7 @@ export interface FeedbackIntent {
   cue: FeedbackCue;
   interactableId: string;
   behaviourKind?: string;
-  /** The input source that caused the moment — haptics target this. */
+  /** The input source that caused the moment - haptics target this. */
   sourceId?: string;
   /** Suggested haptic intensity 0..1 (clients may remap freely). */
   intensity: number;
@@ -38,7 +38,7 @@ export type FeedbackListener = (intent: FeedbackIntent) => void;
 
 /**
  * Client opt-in: forward the haptic half of feedback intents to the input
- * provider's `pulse` (which no-ops on sources without actuators — hands).
+ * provider's `pulse` (which no-ops on sources without actuators - hands).
  * Returns the unsubscribe. Audio remains entirely the client's concern.
  */
 export function routeHapticsToProvider(

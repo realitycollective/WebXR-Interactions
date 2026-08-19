@@ -1,5 +1,5 @@
 /**
- * Pure interaction math — the proven motion functions extracted from the
+ * Pure interaction math - the proven motion functions extracted from the
  * Pale Signal research (springs, hinge/dial normalisation, hoop scoring),
  * plus the tuple vector/quaternion helpers the binder and behaviours need.
  * No engine imports; everything is unit-tested headless.
@@ -22,7 +22,7 @@ export function normalize01(value: number, range: number): number {
 
 /**
  * Did a tossed object pass *through* a hoop this frame? True when it crossed
- * the hoop plane in the scoring direction (downward — `prev` above, `curr`
+ * the hoop plane in the scoring direction (downward - `prev` above, `curr`
  * at/below) while inside the ring (`radial <= radius`).
  */
 export function passedThroughHoop(
@@ -84,8 +84,8 @@ export function clampSym(x: number, mag: number): number {
 
 /**
  * Hinge angle for a position-driven lever: given the hand's offset from the
- * pivot resolved into the hinge plane — `alongRest` (toward the arm's rest
- * direction) and `alongSwing` (the in-plane perpendicular) — the angle the
+ * pivot resolved into the hinge plane - `alongRest` (toward the arm's rest
+ * direction) and `alongSwing` (the in-plane perpendicular) - the angle the
  * arm should take to point at the hand, clamped to `±|maxMag|`.
  */
 export function hingeAngleToHand(alongRest: number, alongSwing: number, maxMag: number): number {
@@ -94,7 +94,7 @@ export function hingeAngleToHand(alongRest: number, alongSwing: number, maxMag: 
 
 /**
  * Map a centered hinge angle in `[-|mag|, +|mag|]` to a 0..1 analog value
- * with the rest (0) at 0.5 — a bidirectional lever as one normalized value.
+ * with the rest (0) at 0.5 - a bidirectional lever as one normalized value.
  */
 export function centeredUnit(angle: number, mag: number): number {
   const m = Math.abs(mag);

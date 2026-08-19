@@ -1,5 +1,5 @@
 /**
- * Engine-side ports — the space queries and transform writes the core
+ * Engine-side ports - the space queries and transform writes the core
  * cannot perform itself. Adapters implement these against their scene
  * graph; the core only ever speaks tuples and interactable ids.
  */
@@ -16,7 +16,7 @@ export interface InteractableHit {
 /**
  * Resolves which interactable a ray or a proximity probe touches.
  * Implemented by the adapter (three.js Raycaster, engine BVH, …). A
- * provider that pre-resolves targeting (IWSDK) may make this redundant —
+ * provider that pre-resolves targeting (IWSDK) may make this redundant -
  * provider hints always take precedence over hit-tester results.
  */
 export interface HitTester {

@@ -1,14 +1,14 @@
 /**
- * The behaviour contract — a mechanism attached to an interactable.
+ * The behaviour contract - a mechanism attached to an interactable.
  *
  * Behaviours are pure state machines: they receive routed input moments
  * (press/grab transitions), tick from `update(dt)`, and write their output
  * through the interactable's {@link TransformPort}. They declare:
  *
- * - `ownership` — who owns the transform (the formalised pale-signal
+ * - `ownership` - who owns the transform (the formalised pale-signal
  *   driven / dragged / handDriven / native models), so a binder knows
  *   without reading code;
- * - `requires` / `requiresAnyOf` — the input capabilities they need;
+ * - `requires` / `requiresAnyOf` - the input capabilities they need;
  *   capability negotiation disables unsatisfiable behaviours VISIBLY
  *   (a `behaviourDisabled` event with the unmet list), never silently.
  */

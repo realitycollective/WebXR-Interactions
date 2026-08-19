@@ -1,5 +1,5 @@
 /**
- * ThreeHitTester — resolves core ray/proximity queries against registered
+ * ThreeHitTester - resolves core ray/proximity queries against registered
  * three.js objects. Ray hits use a Raycaster over the registered roots
  * (recursive); proximity uses world-position distance minus an
  * approximate bounding radius, good enough for poke targets.

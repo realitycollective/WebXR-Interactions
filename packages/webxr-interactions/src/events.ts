@@ -1,5 +1,5 @@
 /**
- * Interaction events — THE only outbound pathway from the interaction core.
+ * Interaction events - THE only outbound pathway from the interaction core.
  *
  * The Pale Signal research showed what happens when events are optional:
  * consumers bypass them and subscribe to raw engine tags, and the same

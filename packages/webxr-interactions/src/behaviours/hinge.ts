@@ -1,5 +1,5 @@
 /**
- * Hinge — a position-driven lever. `handDriven`: grabbing only marks the
+ * Hinge - a position-driven lever. `handDriven`: grabbing only marks the
  * hold; the behaviour reads the holder's hand position each frame and
  * swings the arm to point at it (movement, not wrist), bidirectional about
  * rest, clamped to ±maxAngle. Stays where left on release. Publishes a
@@ -7,7 +7,7 @@
  *
  * All math happens in the interactable's REST local frame, so the mount
  * (table / wall vertical / wall horizontal / any) is simply the parent
- * orientation of the object — no faceYaw plumbing needed.
+ * orientation of the object - no faceYaw plumbing needed.
  */
 import type { Vec3Tuple } from "@realitycollective/webxr-input";
 import {

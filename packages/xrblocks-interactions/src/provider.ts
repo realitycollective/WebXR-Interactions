@@ -1,26 +1,26 @@
 /**
- * XRBlocksInputProvider — EXPERIMENTAL.
+ * XRBlocksInputProvider - EXPERIMENTAL.
  *
  * Binds to the SHAPE of Google XR Blocks (verified against xrblocks
  * v0.20.0 source, 2026-08) without importing `xrblocks`, per the
  * UI Extensions structural-typing convention:
  *
  *  - `xb.input.getFrame()` → `{ raySources, directTouches }`. Those slot
- *    objects are POOLED AND MUTATED per frame upstream — everything is
+ *    objects are POOLED AND MUTATED per frame upstream - everything is
  *    copied here, never retained.
  *  - `RaySourceInput`: `{ controller, sourceType: 'mouse'|'controller-ray'
- *    |'hand-ray'|'gaze'|'simulator', ray, selected }` — handedness from
+ *    |'hand-ray'|'gaze'|'simulator', ray, selected }` - handedness from
  *    `controller.inputSource?.handedness`; analog select only via
  *    `controller.gamepad?.buttons[0].value`; squeeze only as the boolean
  *    `controller.userData.squeezing`.
- *  - `DirectTouchInput`: `{ handIndex (0=left,1=right), point }` — the
+ *  - `DirectTouchInput`: `{ handIndex (0=left,1=right), point }` - the
  *    index-fingertip world position, merged into the matching hand source.
  *  - Grip poses are not exposed by the frame struct; the ray pose doubles
  *    as the carry pose (XR Blocks keeps grip transforms behind
  *    `options.controllers.visualization`).
  *  - Gaze rides `sourceType: 'gaze'` and never raw-selects (XR Blocks
  *    selects gaze via its own dwell; ours is the core's dwell).
- *  - Haptics: none in XR Blocks (verified) — capability stays false.
+ *  - Haptics: none in XR Blocks (verified) - capability stays false.
  */
 import {
   NO_CAPABILITIES,
@@ -75,9 +75,9 @@ export interface XBFrameLike {
 
 /** The slice of the XR Blocks singletons the provider binds to. */
 export interface XRBlocksContext {
-  /** `xb.input` — must expose `getFrame()`. */
+  /** `xb.input` - must expose `getFrame()`. */
   input: { getFrame(): XBFrameLike };
-  /** `xb.camera` / `xb.core.camera` — the head pose. */
+  /** `xb.camera` / `xb.core.camera` - the head pose. */
   camera: {
     getWorldPosition(target: Vec3Like): Vec3Like;
     getWorldQuaternion(target: QuatLike): QuatLike;
@@ -214,7 +214,7 @@ function copyRay(ray: RayLike): {
   origin: [number, number, number];
   direction: [number, number, number];
 } {
-  // Upstream slot objects are pooled — copy, never retain.
+  // Upstream slot objects are pooled - copy, never retain.
   return {
     origin: [ray.origin.x, ray.origin.y, ray.origin.z],
     direction: [ray.direction.x, ray.direction.y, ray.direction.z],

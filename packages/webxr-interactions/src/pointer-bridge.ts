@@ -1,5 +1,5 @@
 /**
- * Pointer bridge — drive the UI Extensions (or anything speaking the
+ * Pointer bridge - drive the UI Extensions (or anything speaking the
  * shared pointer contract) from the SAME input stack that drives the
  * interactions. One provider, both families: this is the coexistence
  * contract in code.
@@ -27,7 +27,7 @@ export interface PointerBridge {
 
 /**
  * Create a pointer stream from the runtime's sampled sources.
- * `match` picks which source drives it (default: any source with a ray —
+ * `match` picks which source drives it (default: any source with a ray -
  * first pressed wins and holds until release).
  */
 export function createPointerBridge(

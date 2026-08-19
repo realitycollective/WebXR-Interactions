@@ -1,5 +1,5 @@
 /**
- * Behaviour factory — turns portable config data into behaviour instances.
+ * Behaviour factory - turns portable config data into behaviour instances.
  * Custom kinds register through {@link registerBehaviourKind}, so apps can
  * add mechanisms without touching the core.
  */

@@ -194,7 +194,7 @@ describe("gaze", () => {
     expect(runtime.getState("button")?.dwell).toBe(0);
 
     // Still gazing: must not refire until re-armed (progress stays clamped
-    // by the fired latch until it drops below rearmBelow — here it refills
+    // by the fired latch until it drops below rearmBelow - here it refills
     // from 0 while armed=false only after falling below 0.1, which it is).
     events = [];
     runtime.update(0.05);

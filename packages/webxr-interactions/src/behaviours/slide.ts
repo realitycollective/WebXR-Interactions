@@ -1,5 +1,5 @@
 /**
- * Slide — a pulley/handle pulled along one local axis. `handDriven` while
+ * Slide - a pulley/handle pulled along one local axis. `handDriven` while
  * held (the pull follows the hand's displacement along −axis), `driven`
  * on release: a spring returns the handle home while the value keeps
  * publishing. Value = pull / travel.

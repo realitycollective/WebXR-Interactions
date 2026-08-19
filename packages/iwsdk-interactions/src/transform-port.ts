@@ -1,5 +1,5 @@
 /**
- * IWSDKTransformPort — the core's TransformPort over an IWSDK entity's
+ * IWSDKTransformPort - the core's TransformPort over an IWSDK entity's
  * `object3D`, honouring FROM-REST semantics (rest captured at
  * construction; `getWorldPose()` reports the rest pose in world space).
  * Same math as the three.js adapter's port, expressed against IWSDK's

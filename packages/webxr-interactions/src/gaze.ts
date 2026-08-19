@@ -1,11 +1,11 @@
 /**
- * Gaze support — first-class, per the design decision that gaze serves two
+ * Gaze support - first-class, per the design decision that gaze serves two
  * roles:
  *
  * 1. **Combination gating** (`gaze.required`): input on an interactable only
  *    counts while the viewer is looking at it.
  * 2. **Accessibility** (`gaze.dwell`): looking at an interactable fills a
- *    dwell meter; a full meter fires a synthesized press — no hands needed.
+ *    dwell meter; a full meter fires a synthesized press - no hands needed.
  *    Consumers render the meter from `dwellProgress` events.
  *
  * The dwell state machine is pure and headless-tested. The runtime feeds it
@@ -52,7 +52,7 @@ export interface DwellTick {
   progress: number;
   /** Progress moved enough to be worth re-rendering (≥ 1%). */
   changed: boolean;
-  /** The meter just completed — fire the synthesized press. */
+  /** The meter just completed - fire the synthesized press. */
   fired: boolean;
 }
 

@@ -1,10 +1,10 @@
 /**
- * @realitycollective/webxr-interactions — the engine-free interaction core.
+ * @realitycollective/webxr-interactions - the engine-free interaction core.
  *
  * Layers (each strictly on the one below):
- *  - behaviours (press, pulse, hinge, dial, slide, grab, tossScore) —
+ *  - behaviours (press, pulse, hinge, dial, slide, grab, tossScore) -
  *    pure state machines driven by `update(dt)`;
- *  - the runtime/binder — targeting, press/grab transitions, gaze gating
+ *  - the runtime/binder - targeting, press/grab transitions, gaze gating
  *    + dwell, capability negotiation, events, feedback intents;
  *  - the shared input contracts, re-exported from
  *    `@realitycollective/webxr-input`.

@@ -1,5 +1,5 @@
 /**
- * @realitycollective/xrblocks-interactions — EXPERIMENTAL Google XR Blocks
+ * @realitycollective/xrblocks-interactions - EXPERIMENTAL Google XR Blocks
  * adapter. Structurally typed against xrblocks v0.20.0 (no xrblocks
  * import); re-exports the core (via the three.js adapter machinery).
  */

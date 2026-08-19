@@ -1,5 +1,5 @@
 /**
- * connectXRBlocksInteractions — EXPERIMENTAL one-call setup.
+ * connectXRBlocksInteractions - EXPERIMENTAL one-call setup.
  *
  * XR Blocks Scripts are ordinary three.js Object3Ds, so the shim reuses
  * the three.js adapter's hit-tester and transform ports; only the input

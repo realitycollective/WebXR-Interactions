@@ -1,5 +1,5 @@
 /**
- * ThreeTransformPort — the write/read surface of one interactable's
+ * ThreeTransformPort - the write/read surface of one interactable's
  * Object3D, honouring the core's FROM-REST semantics: the rest pose is
  * captured at construction, offsets/rotations apply relative to it, and
  * `getWorldPose()` reports the REST pose in world space (external movers

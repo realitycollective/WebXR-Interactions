@@ -1,5 +1,5 @@
 /**
- * createThreeInteractions — one-call setup for the standalone adapter.
+ * createThreeInteractions - one-call setup for the standalone adapter.
  *
  * ```ts
  * const interactions = createThreeInteractions({

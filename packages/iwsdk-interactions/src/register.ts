@@ -10,8 +10,8 @@
  * ```
  *
  * The bridge system runs once per frame: it turns IWSDK's own targeting
- * (`Pressed`/`Grabbed` tags on registered entities) into provider hints —
- * provider power wins over the core's approximate hit-testing — then
+ * (`Pressed`/`Grabbed` tags on registered entities) into provider hints -
+ * provider power wins over the core's approximate hit-testing - then
  * ticks the runtime. A light proximity/ray hit-tester still serves gaze
  * (dwell) and anything IWSDK's pipeline does not cover.
  */

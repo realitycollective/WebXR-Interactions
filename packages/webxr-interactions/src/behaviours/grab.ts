@@ -1,14 +1,14 @@
 /**
- * Grab — pick up and carry an object.
+ * Grab - pick up and carry an object.
  *
  * Two fulfilments, chosen by capability negotiation at bind time:
- * - `"poseOnly"` — the behaviour owns the carry: on grab it captures the
+ * - `"poseOnly"` - the behaviour owns the carry: on grab it captures the
  *   offset between the holder's grip and the object, then follows the grip
  *   each frame via `setWorldPose`. On release the object stays where
- *   dropped — ballistics/physics are deliberately the CLIENT's concern
+ *   dropped - ballistics/physics are deliberately the CLIENT's concern
  *   (physics is a property of the object in space, not of the interaction
  *   layer).
- * - `"native"` — the engine owns carry/throw (e.g. IWSDK grabbables +
+ * - `"native"` - the engine owns carry/throw (e.g. IWSDK grabbables +
  *   physics); the behaviour only mirrors transitions into core events.
  */
 import type { PoseTuple } from "@realitycollective/webxr-input";

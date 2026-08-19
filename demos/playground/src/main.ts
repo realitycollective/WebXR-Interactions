@@ -1,13 +1,13 @@
 /**
- * The independent interaction playground — a client of the standalone
+ * The independent interaction playground - a client of the standalone
  * three.js adapter. No framework: raw WebXR + three.js.
  *
  * Client responsibilities demonstrated on purpose:
  *  - AUDIO: WebAudio blips realised from feedback intents (the framework
- *    only emits intents — the client owns sound).
+ *    only emits intents - the client owns sound).
  *  - HAPTICS: routed to controller actuators via the explicit
  *    `routeHapticsToProvider` opt-in (no-ops on hands).
- *  - PHYSICS: the toss ball's flight after release is CLIENT ballistics —
+ *  - PHYSICS: the toss ball's flight after release is CLIENT ballistics -
  *    physics is a property of the object in space, not of the interaction
  *    layer.
  */
@@ -157,7 +157,7 @@ function updateBall(dt: number): void {
 const hud = document.createElement("div");
 hud.style.cssText =
   "position:fixed;top:12px;left:12px;color:#9fd;font:14px system-ui;z-index:10;user-select:none";
-hud.textContent = "score 0 — click/drag stations; VR button below";
+hud.textContent = "score 0 - click/drag stations; VR button below";
 document.body.appendChild(hud);
 interactions.runtime.onEvent((event) => {
   if (event.type === "scored") hud.textContent = `score ${event.value}`;
@@ -179,7 +179,7 @@ enter.addEventListener("click", () => {
     await renderer.xr.setSession(session);
   })();
 });
-if (!navigator.xr) enter.textContent = "WebXR unavailable — desktop mouse mode";
+if (!navigator.xr) enter.textContent = "WebXR unavailable - desktop mouse mode";
 
 // --- Frame loop -----------------------------------------------------------------
 let last = performance.now();
