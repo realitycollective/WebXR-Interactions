@@ -38,8 +38,8 @@ export function passedThroughHoop(
 
 /**
  * One step of a damped harmonic oscillator (semi-implicit Euler).
- * `out[0]` = next value, `out[1]` = next velocity. An underdamped spring
- * (damping ratio ≈ 0.3–0.5) is what gives a pressed button its bounce.
+ * `out[0]` = next value, `out[1]` = next velocity. An under-damped spring
+ * (damping ratio ≈ 0.3-0.5) is what gives a pressed button its bounce.
  * `dt` is clamped to 1/30 s so a long frame can't blow the integrator up.
  */
 export function springStep(

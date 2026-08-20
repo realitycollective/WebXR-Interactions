@@ -4,14 +4,14 @@ import { defineConfig } from "vite";
 const pkg = (name: string) =>
   fileURLToPath(new URL(`../../packages/${name}/src/index.ts`, import.meta.url));
 
-// The demo resolves the libraries to workspace SOURCE (the UI Extensions
+// The demo resolves the WORKSPACE libraries to source (the UI Extensions
 // contributor model): no build step needed while iterating.
+// @realitycollective/webxr-input is NOT aliased - it is published from its own
+// repository and resolves from node_modules like any other dependency, so this
+// build never depends on a sibling checkout.
 export default defineConfig({
   resolve: {
     alias: {
-      "@realitycollective/webxr-input": fileURLToPath(
-        new URL("../../../WebXR-Input/src/index.ts", import.meta.url),
-      ),
       "@realitycollective/webxr-interactions": pkg("webxr-interactions"),
       "@realitycollective/threejs-interactions": pkg("threejs-interactions"),
     },

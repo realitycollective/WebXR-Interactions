@@ -7,7 +7,7 @@ import {
 import { FakeHitTester, FakeProvider, raySource } from "./helpers.js";
 
 describe("pointer bridge (UI Extensions coexistence)", () => {
-  it("emits press–move–release from the sampled ray + select", () => {
+  it("emits press-move-release from the sampled ray + select", () => {
     const provider = new FakeProvider();
     const runtime = new InteractionRuntime({ provider, hitTester: new FakeHitTester() });
     const bridge = createPointerBridge(runtime);

@@ -7,10 +7,6 @@ const pkg = (name: string) =>
 export default defineConfig({
   resolve: {
     alias: {
-      // The contracts package lives beside this workspace (own repo-to-be).
-      "@realitycollective/webxr-input": fileURLToPath(
-        new URL("../WebXR-Input/src/index.ts", import.meta.url),
-      ),
       "@realitycollective/webxr-interactions": pkg("webxr-interactions"),
       "@realitycollective/threejs-interactions": pkg("threejs-interactions"),
       "@realitycollective/iwsdk-interactions": pkg("iwsdk-interactions"),
@@ -18,7 +14,23 @@ export default defineConfig({
     },
   },
   test: {
+    globals: true,
     include: ["packages/*/test/**/*.test.ts", "demos/*/test/**/*.test.ts"],
     environment: "node",
+    coverage: {
+      provider: "v8",
+      all: true,
+      include: ["packages/webxr-interactions/src/**/*.ts"],
+      // Anti-regression ratchet, set to the current floor. The house style
+      // (service-framework, WebXR-UIExtensions) gates the engine-free core at
+      // 100% - raise these numbers as the behaviour suites fill in, and never
+      // lower them.
+      thresholds: {
+        lines: 91,
+        branches: 81,
+        functions: 78,
+        statements: 88,
+      },
+    },
   },
 });

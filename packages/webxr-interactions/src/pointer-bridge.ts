@@ -6,7 +6,7 @@
  *
  * The returned object implements `PointerInputSource` (structurally
  * identical in `@realitycollective/webxr-input` and
- * `@realitycollective/webxr-uiextensions`): press–move–release derived
+ * `@realitycollective/webxr-uiextensions`): press-move-release derived
  * from a source's ray + select signal, fed by the runtime's per-frame
  * sampling.
  */
