@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/iwsdk-interactions",
-  "version": "0.1.0",
+  "version": "0.1.0-preview.0",
   "description": "Meta IWSDK adapter for the Reality Collective Interaction Extensions - feeds IWSDK's input machinery (Pressed/Grabbed tags, poke/ray interactables, grabbables, XR gamepads, hand joints) into the engine-free @realitycollective/webxr-interactions core, with native grab fulfilment. Re-exports the core.",
   "keywords": [
     "realitycollective",
@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@realitycollective/webxr-input": "^0.1.0",
-    "@realitycollective/webxr-interactions": "^0.1.0"
+    "@realitycollective/webxr-interactions": "^0.1.0-preview.0"
   },
   "peerDependencies": {
     "@iwsdk/core": ">=0.4.0 <0.6.0"
