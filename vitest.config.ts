@@ -25,6 +25,20 @@ export default defineConfig({
       // with nothing to catch it: the numbers looked healthy because the broken
       // file was not being measured.
       include: ["packages/*/src/**/*.ts"],
+      // Files with NO executable code: pure `interface`/`type` declarations and
+      // barrel re-exports. Types are erased before anything runs, so v8 scores
+      // them 0% forever and they drag the totals down while hiding nothing.
+      // Listed one by one rather than by a `**/index.ts` glob, so that an index
+      // file that later grows real logic starts being measured instead of
+      // silently staying exempt.
+      exclude: [
+        "packages/webxr-interactions/src/descriptor.ts",
+        "packages/webxr-interactions/src/ports.ts",
+        "packages/webxr-interactions/src/index.ts",
+        "packages/threejs-interactions/src/index.ts",
+        "packages/iwsdk-interactions/src/index.ts",
+        "packages/xrblocks-interactions/src/index.ts",
+      ],
       // Anti-regression ratchets, one per package, each set to the floor that
       // package actually measures today. Per-package rather than one global
       // number on purpose - a single figure across the workspace would let the
