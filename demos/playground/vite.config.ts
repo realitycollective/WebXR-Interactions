@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { compileUIKit } from "@iwsdk/vite-plugin-uikitml";
 import { defineConfig } from "vite";
 
 const pkg = (name: string) =>
@@ -10,6 +11,7 @@ const pkg = (name: string) =>
 // repository and resolves from node_modules like any other dependency, so this
 // build never depends on a sibling checkout.
 export default defineConfig({
+  plugins: [compileUIKit({ sourceDir: "ui", outputDir: "public/ui" })],
   resolve: {
     alias: {
       "@realitycollective/webxr-interactions": pkg("webxr-interactions"),

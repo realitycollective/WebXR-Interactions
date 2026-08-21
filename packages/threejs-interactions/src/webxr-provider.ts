@@ -29,12 +29,39 @@ export interface WebXRProviderContext {
   camera: Camera;
   /** DOM element for the desktop mouse fallback (canvas). Omit to disable. */
   domElement?: HTMLElement;
+  /**
+   * Metres along the mouse ray at which the desktop fallback places its
+   * synthetic grip pose. Hand-driven behaviours (grab, hinge, dial, slide)
+   * track a grip position; a mouse has none, so one is projected onto the ray.
+   * Set this near the distance of the things being manipulated - too short and
+   * levers barely swing, too long and they over-swing. Default 1 metre.
+   */
+  desktopGripDistance?: number;
+  /**
+   * Which mouse button reports `squeeze` on desktop. Default `"left"`.
+   *
+   * The right button is NOT the default, because the shared desktop camera
+   * controls (`DesktopControls` in `@realitycollective/xrblocks-uiextensions`)
+   * bind right-drag to look and reserve the left button for interaction. That
+   * leaves the left button to carry both actions, which is fine as long as an
+   * interactable does not mix a select-driven behaviour (press) with a
+   * grab-driven one (grab, hinge, dial, slide) - such an interactable would
+   * receive both on a single click. Use `"right"` only in an app that does not
+   * use right-drag to look.
+   */
+  desktopSqueezeButton?: "left" | "right" | "none";
 }
 
 interface SelectState {
   selecting: boolean;
   squeezing: boolean;
 }
+
+/** Where the desktop fallback puts its synthetic grip along the mouse ray. */
+const DEFAULT_DESKTOP_GRIP_DISTANCE = 1;
+
+/** Centre of the viewport, used while the pointer is locked. */
+const ZERO_NDC = new Vector2(0, 0);
 
 export class WebXRInputProvider implements InputProvider {
   private readonly context: WebXRProviderContext;
@@ -47,16 +74,25 @@ export class WebXRInputProvider implements InputProvider {
 
   // Desktop pointer state.
   private mouseDown = false;
+  private mouseRight = false;
   private readonly mouseNdc = new Vector2();
   private readonly raycaster = new Raycaster();
   private readonly detachDom: Unsubscribe;
+  private readonly gripDistance: number;
+  private readonly squeezeButton: "left" | "right" | "none";
 
   // Temps.
   private readonly v = new Vector3();
   private readonly q = new Quaternion();
+  private readonly pointerNdc = new Vector2();
+  private readonly gripPoint = new Vector3();
+  private readonly gripQuaternion = new Quaternion();
 
   constructor(context: WebXRProviderContext) {
     this.context = context;
+    this.gripDistance = context.desktopGripDistance ?? DEFAULT_DESKTOP_GRIP_DISTANCE;
+    // Read before attachDom - it decides whether to claim the context menu.
+    this.squeezeButton = context.desktopSqueezeButton ?? "left";
     this.capabilities = { ...NO_CAPABILITIES, headPose: true, gaze: true };
     this.detachDom = this.attachDom(context.domElement);
     this.refreshCapabilities();
@@ -73,17 +109,27 @@ export class WebXRInputProvider implements InputProvider {
     };
     const onDown = (event: PointerEvent) => {
       if (event.button === 0) this.mouseDown = true;
+      if (event.button === 2) this.mouseRight = true;
       onMove(event);
     };
     const onUp = (event: PointerEvent) => {
       if (event.button === 0) this.mouseDown = false;
+      if (event.button === 2) this.mouseRight = false;
     };
     element.addEventListener("pointermove", onMove);
     element.addEventListener("pointerdown", onDown);
+    // Only when the right button carries squeeze. Otherwise the menu belongs to
+    // whoever else is listening - the shared camera controls suppress it there.
+    // Without this, a right press opens the menu, the matching pointerup never
+    // arrives, and the squeeze latches on.
+    const onContextMenu =
+      this.squeezeButton === "right" ? (event: Event) => event.preventDefault() : undefined;
+    if (onContextMenu) element.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("pointerup", onUp);
     return () => {
       element.removeEventListener("pointermove", onMove);
       element.removeEventListener("pointerdown", onDown);
+      if (onContextMenu) element.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("pointerup", onUp);
     };
   }
@@ -150,11 +196,20 @@ export class WebXRInputProvider implements InputProvider {
 
   private refreshCapabilities(): void {
     const session = this.boundSession ?? this.context.xr.getSession();
+    const desktop = this.context.domElement !== undefined && session === null;
     const next: InputCapabilities = {
       ...NO_CAPABILITIES,
       headPose: true,
       gaze: true,
-      pointer2d: this.context.domElement !== undefined && session === null,
+      pointer2d: desktop,
+      // NOTE: `rays` stays false on desktop on purpose. sample() uses it as the
+      // "a session just ended" sentinel, so setting it here would re-derive
+      // capabilities on every frame for the whole life of the page.
+      // The desktop fallback synthesises a grip on the mouse ray, so hand-driven
+      // behaviours (grab, hinge, dial, slide) negotiate successfully. Without
+      // this `grabs` stays "none" off-headset and capability negotiation
+      // disables every one of them, leaving press as the only usable behaviour.
+      grabs: desktop ? "poseOnly" : NO_CAPABILITIES.grabs,
     };
     if (session) {
       for (const source of session.inputSources) {
@@ -271,28 +326,53 @@ export class WebXRInputProvider implements InputProvider {
     return state.squeezing ? 1 : 0;
   }
 
+  /** Is the configured squeeze button currently held? */
+  private squeezing(): boolean {
+    if (this.squeezeButton === "left") return this.mouseDown;
+    if (this.squeezeButton === "right") return this.mouseRight;
+    return false;
+  }
+
   private sampleDesktop(): readonly InputSourceSnapshot[] {
-    if (!this.context.domElement) return [];
-    this.raycaster.setFromCamera(this.mouseNdc, this.context.camera);
+    const element = this.context.domElement;
+    if (!element) return [];
+
+    // Under pointer lock the cursor stops moving and clientX/clientY freeze, so
+    // the tracked NDC would stick wherever the pointer was when it locked. A
+    // locked pointer aims from the centre of the viewport instead.
+    const locked =
+      typeof document !== "undefined" && document.pointerLockElement === element;
+    this.pointerNdc.copy(locked ? ZERO_NDC : this.mouseNdc);
+    this.raycaster.setFromCamera(this.pointerNdc, this.context.camera);
+
+    const { origin, direction } = this.raycaster.ray;
+    // A mouse has no grip. Hand-driven behaviours read `gripPose.position` (or
+    // fall back to `ray.origin`, which is the camera and barely moves), so
+    // project a grip onto the ray to give them something that tracks the
+    // pointer.
+    this.gripPoint.copy(direction).multiplyScalar(this.gripDistance).add(origin);
+    this.context.camera.getWorldQuaternion(this.gripQuaternion);
+
     return [
       {
         id: "mouse",
         kind: "pointer2d",
         handedness: "none",
         ray: {
-          origin: [
-            this.raycaster.ray.origin.x,
-            this.raycaster.ray.origin.y,
-            this.raycaster.ray.origin.z,
-          ],
-          direction: [
-            this.raycaster.ray.direction.x,
-            this.raycaster.ray.direction.y,
-            this.raycaster.ray.direction.z,
+          origin: [origin.x, origin.y, origin.z],
+          direction: [direction.x, direction.y, direction.z],
+        },
+        gripPose: {
+          position: [this.gripPoint.x, this.gripPoint.y, this.gripPoint.z],
+          quaternion: [
+            this.gripQuaternion.x,
+            this.gripQuaternion.y,
+            this.gripQuaternion.z,
+            this.gripQuaternion.w,
           ],
         },
         select: this.mouseDown ? 1 : 0,
-        squeeze: 0,
+        squeeze: this.squeezing() ? 1 : 0,
       },
     ];
   }

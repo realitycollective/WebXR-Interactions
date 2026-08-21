@@ -20,16 +20,57 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       all: true,
-      include: ["packages/webxr-interactions/src/**/*.ts"],
-      // Anti-regression ratchet, set to the current floor. The house style
-      // (service-framework, WebXR-UIExtensions) gates the engine-free core at
-      // 100% - raise these numbers as the behaviour suites fill in, and never
-      // lower them.
+      // EVERY package, not just the engine-free core. The adapters were
+      // previously invisible here, which is how a desktop-input defect shipped
+      // with nothing to catch it: the numbers looked healthy because the broken
+      // file was not being measured.
+      include: ["packages/*/src/**/*.ts"],
+      // Anti-regression ratchets, one per package, each set to the floor that
+      // package actually measures today. Per-package rather than one global
+      // number on purpose - a single figure across the workspace would let the
+      // well-tested core slide from 88% to the workspace average without
+      // failing. Raise these as suites fill in, and never lower them.
+      //
+      // The house style (service-framework, WebXR-UIExtensions) gates at 100%
+      // on the headlessly-testable modules. The core is close; the adapters are
+      // a long way off, and the honest numbers are recorded here rather than
+      // hidden by narrowing `include`.
       thresholds: {
-        lines: 91,
-        branches: 81,
-        functions: 78,
-        statements: 88,
+        // Applies to any package added later that has no ratchet of its own.
+        lines: 60,
+        branches: 58,
+        functions: 56,
+        statements: 60,
+
+        // The engine-free core. Closest to the house standard.
+        "packages/webxr-interactions/src/**": {
+          lines: 91,
+          branches: 81,
+          functions: 78,
+          statements: 88,
+        },
+        // Desktop fallback now covered; hit-testing and the session path are not.
+        "packages/threejs-interactions/src/**": {
+          lines: 54,
+          branches: 37,
+          functions: 49,
+          statements: 51,
+        },
+        // Provider covered, host is not.
+        "packages/xrblocks-interactions/src/**": {
+          lines: 64,
+          branches: 79,
+          functions: 33,
+          statements: 62,
+        },
+        // NO TESTS AT ALL. Zero is the truth, not an aspiration - this adapter
+        // has no test file, so every number below is a task, not a target.
+        "packages/iwsdk-interactions/src/**": {
+          lines: 0,
+          branches: 0,
+          functions: 0,
+          statements: 0,
+        },
       },
     },
   },

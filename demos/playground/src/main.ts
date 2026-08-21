@@ -27,7 +27,20 @@ import {
   createThreeInteractions,
   routeHapticsToProvider,
 } from "@realitycollective/threejs-interactions";
-import { buildStations, PLAYGROUND_DESCRIPTOR } from "./stations.js";
+import * as horizonKit from "@pmndrs/uikit-horizon";
+import {
+  applyScene,
+  cameraHeadPoseSource,
+  configureRendererForUikit,
+  DesktopControls,
+  UixWindowHost,
+} from "@realitycollective/xrblocks-uiextensions";
+import {
+  buildStations,
+  PLAYGROUND_DESCRIPTOR,
+  STATION_INFO,
+  STATION_PANELS,
+} from "./stations.js";
 
 const container = document.getElementById("scene-container") as HTMLDivElement;
 
@@ -45,19 +58,51 @@ const floor = new Mesh(
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
+// DesktopControls owns the camera pose off-headset, so no start position is set
+// here - it is passed to the controls below instead.
 const camera = new PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
-camera.position.set(0, 1.5, 0.4);
 
 const renderer = new WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(devicePixelRatio);
 renderer.xr.enabled = true;
+// Required by uikit: renderOrder-based transparent sorting and local clipping.
+// Without it, panel text sorts behind its own panel at some angles.
+configureRendererForUikit(renderer);
 container.appendChild(renderer.domElement);
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+
+// --- Desktop camera ----------------------------------------------------------
+// The SAME controls the UI Extensions demos use, so both playgrounds steer
+// identically: WASD/arrows walk, Shift sprints, Space jumps, C crouches and
+// right-drag looks. The left button is deliberately left alone for interaction.
+const controls = new DesktopControls(camera, {
+  domElement: renderer.domElement,
+  start: [0, 0.9],
+});
+// The stations sit at roughly a metre, below standing eye height, so a level
+// start pitch puts them all in the bottom of the frame. Tilt down a little.
+controls.pitch = -0.2;
+
+// --- Station description panels ----------------------------------------------
+// Real UI Extensions windows, not bespoke labels: the same window host, chrome
+// and docking the UI Extensions playground uses.
+const panels = new UixWindowHost({
+  scene,
+  headPose: cameraHeadPoseSource(camera),
+  kit: horizonKit as never,
+});
+panels.onPanelReady(({ id, panel }) => {
+  const info = STATION_INFO[id];
+  if (!info) return;
+  panel.getElementById("body")?.setProperties({ text: info.body });
+  panel.getElementById("hint")?.setProperties({ text: info.hint });
+});
+applyScene(panels, STATION_PANELS);
 
 // --- Stations + interactions -------------------------------------------------
 const stations = buildStations();
@@ -67,6 +112,10 @@ const interactions = createThreeInteractions({
   xr: renderer.xr,
   camera,
   domElement: renderer.domElement,
+  // The stations sit roughly a metre out on the ring, which is where the
+  // desktop fallback should place its synthetic grip for the levers to swing
+  // at a sensible rate.
+  desktopGripDistance: 0.95,
 });
 for (const interactable of PLAYGROUND_DESCRIPTOR.interactables) {
   const object = stations.objects.get(interactable.id);
@@ -157,7 +206,8 @@ function updateBall(dt: number): void {
 const hud = document.createElement("div");
 hud.style.cssText =
   "position:fixed;top:12px;left:12px;color:#9fd;font:14px system-ui;z-index:10;user-select:none";
-hud.textContent = "score 0 - click/drag stations; VR button below";
+hud.textContent =
+  "score 0 - WASD walk, Shift run, Space jump, C crouch, right-drag look, left-click/drag to work a station";
 document.body.appendChild(hud);
 interactions.runtime.onEvent((event) => {
   if (event.type === "scored") hud.textContent = `score ${event.value}`;
@@ -187,6 +237,10 @@ renderer.setAnimationLoop(() => {
   const now = performance.now();
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  // In a session the headset owns the camera pose, so the desktop controls must
+  // not fight it for the transform.
+  if (!renderer.xr.isPresenting) controls.update(dt);
+  panels.update(dt);
   interactions.update(dt);
   updateBall(dt);
   renderer.render(scene, camera);

@@ -9,10 +9,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@pmndrs/uikit-horizon": "^1.0.74",
     "@realitycollective/threejs-interactions": "*",
+    "@realitycollective/xrblocks-uiextensions": "^0.1.0-preview.0",
     "three": "npm:super-three@0.181.0"
   },
   "devDependencies": {
+    "@iwsdk/vite-plugin-uikitml": "0.4.2",
     "@types/three": "*",
     "typescript": "^5.5.0",
     "vite": "^7.1.4"

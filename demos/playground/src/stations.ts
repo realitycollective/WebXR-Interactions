@@ -16,6 +16,7 @@ import {
   TorusGeometry,
 } from "three";
 import type { InteractionDescriptor } from "@realitycollective/threejs-interactions";
+import type { SceneDescriptor } from "@realitycollective/xrblocks-uiextensions";
 
 /** Ring layout: bearing 0° straight ahead (−Z), radius meters, height y. */
 export function onRing(deg: number, r = 0.55, y = 1.0): [number, number, number] {
@@ -70,6 +71,73 @@ export const PLAYGROUND_DESCRIPTOR: InteractionDescriptor = {
       behaviours: [{ kind: "tossScore", targetIds: ["pg-ball"], radius: 0.2, axis: [0, 1, 0] }],
     },
   ],
+};
+
+/**
+ * Description panels, one per station group, as UI Extensions windows.
+ *
+ * They sit on a wider ring than the stations so they never sit between you and
+ * the thing they describe, and the window host turns each one to face the head
+ * pose, so no rotation is carried here.
+ *
+ * Every window loads the SAME compiled markup. The per-station wording is
+ * injected in main.ts once the panel is ready, so this stays one template
+ * rather than seven near-identical files.
+ */
+// Well outside the station ring. The furthest station geometry is the hoop at
+// 1.2m and the gaze post at 0.9m, so a panel ring of 1.55 sits behind all of it
+// and nothing occludes a panel from the middle of the playground.
+const PANEL_RING = 1.55;
+const PANEL_HEIGHT = 1.65;
+const PANEL_WIDTH = 0.42;
+const panelAt = (deg: number) => onRing(deg, PANEL_RING, PANEL_HEIGHT);
+
+// Bearings track their station but are nudged apart. At 1.55m a 0.42m panel
+// subtends about 16 degrees, so these ~22 degree gaps leave clear air between
+// neighbours - at the old 0.95m ring they overlapped badly in the middle.
+export const STATION_PANELS: SceneDescriptor = {
+  name: "Interaction playground stations",
+  windows: [
+    { id: "info-lever-wall", title: "Wall Levers", config: "./ui/station.json", position: panelAt(-82) },
+    { id: "info-lever-table", title: "Table Lever", config: "./ui/station.json", position: panelAt(-42) },
+    { id: "info-gaze", title: "Gaze Dwell", config: "./ui/station.json", position: panelAt(-20) },
+    { id: "info-toss", title: "Scoop & Toss", config: "./ui/station.json", position: panelAt(2) },
+    { id: "info-button", title: "Push Button", config: "./ui/station.json", position: panelAt(30) },
+    { id: "info-dial", title: "Dial", config: "./ui/station.json", position: panelAt(62) },
+    { id: "info-pulley", title: "Pulley", config: "./ui/station.json", position: panelAt(96) },
+  ].map((window) => ({ ...window, maxWidth: PANEL_WIDTH, maxHeight: 0.34 })),
+};
+
+/** Body and hint copy for each panel in {@link STATION_PANELS}. */
+export const STATION_INFO: Record<string, { body: string; hint: string }> = {
+  "info-toss": {
+    body: "A ball you can pick up and throw at the hoop above it. The flight after you let go is the demo's own physics - the interaction layer reports the grab and the release, nothing more.",
+    hint: "Hold left mouse on the ball and throw",
+  },
+  "info-gaze": {
+    body: "Looks back at you. Keep it centred in view and the ring fills; hold long enough and it presses itself, with no click at all.",
+    hint: "Right-drag to aim, then hold still",
+  },
+  "info-lever-table": {
+    body: "A lever pivoted at its base that swings toward your hand. Position drives it, not a button, so it follows wherever you pull.",
+    hint: "Hold left mouse and pull",
+  },
+  "info-lever-wall": {
+    body: "The same lever behaviour on a wall plate, once swinging up and down and once side to side. Only the hinge axis differs between them.",
+    hint: "Hold left mouse and pull",
+  },
+  "info-button": {
+    body: "A push button that travels as you press it and pulses when it fires. The simplest station here, and the only kind that works from a plain click.",
+    hint: "Left click",
+  },
+  "info-dial": {
+    body: "A knob that turns to follow your hand through one and a half turns. The marker shows where it is pointing.",
+    hint: "Hold left mouse and turn",
+  },
+  "info-pulley": {
+    body: "A handle that slides along a fixed rail and springs back when released. It only ever moves along its one axis, however you pull it.",
+    hint: "Hold left mouse and slide",
+  },
 };
 
 export interface BuiltStations {
