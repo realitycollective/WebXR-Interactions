@@ -1,0 +1,41 @@
+{
+  "name": "webxr-interactions-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Workspace for the Reality Collective WebXR Interaction Extensions - an engine-free interaction core for WebXR, with three.js, Meta IWSDK and Google XR Blocks adapters and a demo playground.",
+  "workspaces": [
+    "packages/*",
+    "demos/*"
+  ],
+  "overrides": {
+    "three": "npm:super-three@0.181.0"
+  },
+  "scripts": {
+    "build": "npm --workspace @realitycollective/webxr-interactions run build && npm --workspace @realitycollective/threejs-interactions run build && npm --workspace @realitycollective/iwsdk-interactions run build && npm --workspace @realitycollective/xrblocks-interactions run build",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "verify:pack": "node scripts/verify-pack.mjs",
+    "build:playground": "npm run build && npm --workspace playground-demo run build",
+    "build:demos": "npm run build:playground",
+    "dev:playground": "npm run dev -w playground-demo",
+    "smoke": "node scripts/smoke-deploy.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/three": "^0.180.0",
+    "@vitest/coverage-v8": "^4.1.8",
+    "playwright-core": "^1.61.1",
+    "three": "npm:super-three@0.181.0",
+    "typescript": "^5.5.0",
+    "vite": "^7.1.4",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  },
+  "allowScripts": {
+    "esbuild": true
+  }
+}

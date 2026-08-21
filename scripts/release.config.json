@@ -1,0 +1,14 @@
+{
+  "core": "webxr-interactions",
+  "packages": [
+    "webxr-interactions",
+    "threejs-interactions",
+    "iwsdk-interactions",
+    "xrblocks-interactions"
+  ],
+  "importCheck": [
+    "webxr-interactions"
+  ],
+  "legacyPeerDeps": true,
+  "preid": "preview"
+}

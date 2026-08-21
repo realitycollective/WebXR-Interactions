@@ -1,0 +1,51 @@
+{
+  "name": "@realitycollective/webxr-interactions",
+  "version": "0.1.0-preview.0",
+  "description": "Engine-free core of the Reality Collective Interaction Extensions: interactables, interactors, behaviours (press, hinge, dial, slide, grab, toss-scoring, pulse, gaze-dwell), capability negotiation and feedback hooks - driven through the shared @realitycollective/webxr-input contracts. Pair with an engine adapter: threejs-interactions, iwsdk-interactions or xrblocks-interactions.",
+  "keywords": [
+    "realitycollective",
+    "webxr",
+    "xr",
+    "interaction",
+    "input",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@realitycollective/webxr-input": "^0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Interactions.git",
+    "directory": "packages/webxr-interactions"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Interactions#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Interactions/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

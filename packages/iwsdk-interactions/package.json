@@ -1,0 +1,61 @@
+{
+  "name": "@realitycollective/iwsdk-interactions",
+  "version": "0.1.0-preview.0",
+  "description": "Meta IWSDK adapter for the Reality Collective Interaction Extensions - feeds IWSDK's input machinery (Pressed/Grabbed tags, poke/ray interactables, grabbables, XR gamepads, hand joints) into the engine-free @realitycollective/webxr-interactions core, with native grab fulfilment. Re-exports the core.",
+  "keywords": [
+    "realitycollective",
+    "iwsdk",
+    "webxr",
+    "xr",
+    "interaction",
+    "input",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@realitycollective/webxr-input": "^0.1.0",
+    "@realitycollective/webxr-interactions": "^0.1.0-preview.0"
+  },
+  "peerDependencies": {
+    "@iwsdk/core": ">=0.4.0 <0.6.0"
+  },
+  "devDependencies": {
+    "@iwsdk/core": "0.4.2",
+    "three": "npm:super-three@0.181.0",
+    "@types/three": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Interactions.git",
+    "directory": "packages/iwsdk-interactions"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Interactions#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Interactions/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

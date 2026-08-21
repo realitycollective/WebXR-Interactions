@@ -1,0 +1,62 @@
+{
+  "name": "@realitycollective/xrblocks-interactions",
+  "version": "0.1.0-preview.0",
+  "description": "EXPERIMENTAL Google XR Blocks adapter for the Reality Collective Interaction Extensions - maps XR Blocks' input pipeline (Input.getFrame() ray sources + direct touches, Script select events) into the engine-free @realitycollective/webxr-interactions core, reusing the three.js hit-testing/transform machinery. Structurally typed: no xrblocks import. Re-exports the core.",
+  "keywords": [
+    "realitycollective",
+    "xrblocks",
+    "androidxr",
+    "webxr",
+    "threejs",
+    "interaction",
+    "input",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@realitycollective/webxr-input": "^0.1.0",
+    "@realitycollective/webxr-interactions": "^0.1.0-preview.0",
+    "@realitycollective/threejs-interactions": "^0.1.0-preview.0"
+  },
+  "peerDependencies": {
+    "three": ">=0.170.0"
+  },
+  "devDependencies": {
+    "three": "npm:super-three@0.181.0",
+    "@types/three": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Interactions.git",
+    "directory": "packages/xrblocks-interactions"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Interactions#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Interactions/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

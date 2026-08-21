@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "moduleDetection": "force",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "inlineSources": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@realitycollective/webxr-interactions": ["./packages/webxr-interactions/src/index.ts"],
+      "@realitycollective/threejs-interactions": ["./packages/threejs-interactions/src/index.ts"],
+      "@realitycollective/iwsdk-interactions": ["./packages/iwsdk-interactions/src/index.ts"],
+      "@realitycollective/xrblocks-interactions": ["./packages/xrblocks-interactions/src/index.ts"]
+    }
+  }
+}
