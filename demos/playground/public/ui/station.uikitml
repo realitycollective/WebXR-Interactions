@@ -14,8 +14,7 @@
     display: flex;
     flex-direction: column;
     width: 260;
-    background-color: #101a26;
-    background-opacity: 0.92;
+    background-color: rgba(16, 26, 38, 0.92);
     border-color: #2e4a66;
     border-width: 0.75;
     border-radius: 12.5;

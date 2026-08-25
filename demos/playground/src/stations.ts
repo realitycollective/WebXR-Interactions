@@ -98,13 +98,13 @@ const panelAt = (deg: number) => onRing(deg, PANEL_RING, PANEL_HEIGHT);
 export const STATION_PANELS: SceneDescriptor = {
   name: "Interaction playground stations",
   windows: [
-    { id: "info-lever-wall", title: "Wall Levers", config: "./ui/station.json", position: panelAt(-82) },
-    { id: "info-lever-table", title: "Table Lever", config: "./ui/station.json", position: panelAt(-42) },
-    { id: "info-gaze", title: "Gaze Dwell", config: "./ui/station.json", position: panelAt(-20) },
-    { id: "info-toss", title: "Scoop & Toss", config: "./ui/station.json", position: panelAt(2) },
-    { id: "info-button", title: "Push Button", config: "./ui/station.json", position: panelAt(30) },
-    { id: "info-dial", title: "Dial", config: "./ui/station.json", position: panelAt(62) },
-    { id: "info-pulley", title: "Pulley", config: "./ui/station.json", position: panelAt(96) },
+    { id: "info-lever-wall", title: "Wall Levers", config: "./ui/station.uikitml", position: panelAt(-82) },
+    { id: "info-lever-table", title: "Table Lever", config: "./ui/station.uikitml", position: panelAt(-42) },
+    { id: "info-gaze", title: "Gaze Dwell", config: "./ui/station.uikitml", position: panelAt(-20) },
+    { id: "info-toss", title: "Scoop & Toss", config: "./ui/station.uikitml", position: panelAt(2) },
+    { id: "info-button", title: "Push Button", config: "./ui/station.uikitml", position: panelAt(30) },
+    { id: "info-dial", title: "Dial", config: "./ui/station.uikitml", position: panelAt(62) },
+    { id: "info-pulley", title: "Pulley", config: "./ui/station.uikitml", position: panelAt(96) },
   ].map((window) => ({ ...window, maxWidth: PANEL_WIDTH, maxHeight: 0.34 })),
 };
 

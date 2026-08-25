@@ -1,5 +1,4 @@
 import { fileURLToPath } from "node:url";
-import { compileUIKit } from "@iwsdk/vite-plugin-uikitml";
 import { defineConfig } from "vite";
 
 const pkg = (name: string) =>
@@ -10,8 +9,12 @@ const pkg = (name: string) =>
 // @realitycollective/webxr-input is NOT aliased - it is published from its own
 // repository and resolves from node_modules like any other dependency, so this
 // build never depends on a sibling checkout.
+//
+// There is no UIKitML build step. `@iwsdk/vite-plugin-uikitml` was discontinued
+// at 0.4.2, and it only ever did `JSON.stringify(parse(source))`. The panels are
+// now served as `.uikitml` source from public/ui and parsed in the browser - see
+// the `loadConfig` resolver in src/main.ts.
 export default defineConfig({
-  plugins: [compileUIKit({ sourceDir: "ui", outputDir: "public/ui" })],
   resolve: {
     alias: {
       "@realitycollective/webxr-interactions": pkg("webxr-interactions"),

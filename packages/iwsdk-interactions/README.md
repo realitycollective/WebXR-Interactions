@@ -33,7 +33,7 @@ interactions.runtime.onEvent((event) => console.log(event.type));
 
 ## Peer dependency
 
-`@iwsdk/core >=0.4.0 <0.6.0`.
+`@iwsdk/core >=0.5.0 <0.6.0`. The adapter is source-compatible with 0.4.x, but 0.5 is the only line CI exercises, so that is the only line supported.
 
 ## Live demo
 

@@ -36,10 +36,10 @@
     "@realitycollective/webxr-interactions": "^0.1.0-preview.1"
   },
   "peerDependencies": {
-    "@iwsdk/core": ">=0.4.0 <0.6.0"
+    "@iwsdk/core": ">=0.5.0 <0.6.0"
   },
   "devDependencies": {
-    "@iwsdk/core": "0.4.2",
+    "@iwsdk/core": "0.5.3",
     "three": "npm:super-three@0.181.0",
     "@types/three": "*"
   },
