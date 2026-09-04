@@ -3,11 +3,13 @@
   "packages": [
     "webxr-interactions",
     "threejs-interactions",
+    "babylon-interactions",
     "iwsdk-interactions",
     "xrblocks-interactions"
   ],
   "importCheck": [
-    "webxr-interactions"
+    "webxr-interactions",
+    "babylon-interactions"
   ],
   "legacyPeerDeps": true,
   "preid": "preview"

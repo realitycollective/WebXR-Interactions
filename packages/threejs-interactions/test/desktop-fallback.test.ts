@@ -12,7 +12,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PerspectiveCamera } from "three";
-import { WebXRInputProvider } from "@realitycollective/threejs-interactions";
+import {
+  WebXRInputProvider,
+  type InputSourceSnapshotWithVelocity,
+} from "@realitycollective/threejs-interactions";
 
 type Handler = (event: unknown) => void;
 
@@ -169,5 +172,16 @@ describe("desktop squeeze button", () => {
     element.fire("pointerdown", press(2));
     expect(provider.sample()[0]!.squeeze).toBe(0);
     expect(provider.sample()[0]!.select).toBe(1);
+  });
+});
+
+describe("desktop velocity", () => {
+  it("synthesises none, so the core derives it from the camera-driven grip", () => {
+    // A mouse reports no velocity of its own. The grip sits on the camera ray,
+    // so whatever the tracker measures is camera motion, not hand motion.
+    const { provider } = desktopProvider();
+    const source = provider.sample()[0] as InputSourceSnapshotWithVelocity;
+    expect(source.linearVelocity).toBeUndefined();
+    expect(source.angularVelocity).toBeUndefined();
   });
 });

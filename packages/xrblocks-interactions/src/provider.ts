@@ -88,6 +88,13 @@ const SCRATCH_V = { x: 0, y: 0, z: 0 };
 const SCRATCH_Q = { x: 0, y: 0, z: 0, w: 1 };
 
 export class XRBlocksInputProvider implements InputProvider {
+  /**
+   * XR Blocks owns its own controller and hand visuals and exposes no way
+   * to hide them, so there is no presence to offer. Becomes
+   * `capabilities.presence` at `@realitycollective/webxr-input` 0.1.1.
+   */
+  readonly supportsPresence = false;
+
   private readonly context: XRBlocksContext;
   private capabilities: InputCapabilities = { ...NO_CAPABILITIES, headPose: true, gaze: true };
   private readonly capsListeners = new Set<(c: InputCapabilities) => void>();

@@ -1,0 +1,54 @@
+{
+  "name": "@realitycollective/babylon-interactions",
+  "version": "0.1.0-preview.2",
+  "description": "Babylon.js adapter for the Reality Collective Interaction Extensions - maps a Babylon WebXR experience (WebXRDefaultExperience controllers, motion controller components, hand-tracking joints) into the engine-free @realitycollective/webxr-interactions core, with a scene pointer fallback on desktop. Structurally typed: no @babylonjs/core import. Re-exports the core.",
+  "keywords": [
+    "realitycollective",
+    "babylonjs",
+    "babylon",
+    "webxr",
+    "xr",
+    "interaction",
+    "input",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@realitycollective/webxr-input": "^0.1.0",
+    "@realitycollective/webxr-interactions": "^0.1.0-preview.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Interactions.git",
+    "directory": "packages/babylon-interactions"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Interactions#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Interactions/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

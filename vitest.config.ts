@@ -9,6 +9,7 @@ export default defineConfig({
     alias: {
       "@realitycollective/webxr-interactions": pkg("webxr-interactions"),
       "@realitycollective/threejs-interactions": pkg("threejs-interactions"),
+      "@realitycollective/babylon-interactions": pkg("babylon-interactions"),
       "@realitycollective/iwsdk-interactions": pkg("iwsdk-interactions"),
       "@realitycollective/xrblocks-interactions": pkg("xrblocks-interactions"),
     },
@@ -36,6 +37,7 @@ export default defineConfig({
         "packages/webxr-interactions/src/ports.ts",
         "packages/webxr-interactions/src/index.ts",
         "packages/threejs-interactions/src/index.ts",
+        "packages/babylon-interactions/src/index.ts",
         "packages/iwsdk-interactions/src/index.ts",
         "packages/xrblocks-interactions/src/index.ts",
       ],
@@ -58,32 +60,47 @@ export default defineConfig({
 
         // The engine-free core. Closest to the house standard.
         "packages/webxr-interactions/src/**": {
-          lines: 91,
-          branches: 81,
-          functions: 78,
-          statements: 88,
+          lines: 93,
+          branches: 84,
+          functions: 82,
+          statements: 91,
         },
-        // Desktop fallback now covered; hit-testing and the session path are not.
+        // Desktop fallback, presence, hit-testing and the session sampling
+        // path are covered. The host wiring is not.
         "packages/threejs-interactions/src/**": {
-          lines: 54,
-          branches: 37,
-          functions: 49,
-          statements: 51,
+          lines: 79,
+          branches: 68,
+          functions: 70,
+          statements: 77,
+        },
+        // Babylon has no package in this workspace, so the adapter is typed
+        // against the shape of its API and the whole of it - provider, hit
+        // tester, transform port and host - is reachable from structural
+        // fakes. Nothing here needs a browser, so the floor is the house
+        // standard rather than a task.
+        "packages/babylon-interactions/src/**": {
+          lines: 100,
+          branches: 88,
+          functions: 100,
+          statements: 98,
         },
         // Provider covered, host is not.
         "packages/xrblocks-interactions/src/**": {
-          lines: 64,
-          branches: 79,
-          functions: 33,
-          statements: 62,
+          lines: 69,
+          branches: 80,
+          functions: 55,
+          statements: 70,
         },
-        // NO TESTS AT ALL. Zero is the truth, not an aspiration - this adapter
-        // has no test file, so every number below is a task, not a target.
+        // Was 0/0/0/0 with no test file at all. The provider is now covered
+        // headlessly (@iwsdk/core imports in node, so the tests use a
+        // structural fake world and no module mocking). What is left below is
+        // register.ts - the bridge system needs a real elics world - and the
+        // transform port, so these numbers are still tasks, not targets.
         "packages/iwsdk-interactions/src/**": {
-          lines: 0,
-          branches: 0,
-          functions: 0,
-          statements: 0,
+          lines: 52,
+          branches: 52,
+          functions: 55,
+          statements: 53,
         },
       },
     },

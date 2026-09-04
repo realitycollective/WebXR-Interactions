@@ -38,6 +38,11 @@ import type { FeedbackIntent, FeedbackListener } from "./feedback.js";
 import { DwellState, resolveDwellConfig, DWELL_DEFAULTS, type DwellConfig } from "./gaze.js";
 import { vApplyQuat } from "./math.js";
 import type { HitTester, TransformPort } from "./ports.js";
+import {
+  VelocityTracker,
+  type InputSourceSnapshotWithVelocity,
+  type VelocityTrackerOptions,
+} from "./velocity-tracker.js";
 
 const DEFAULT_POKE_RADIUS = 0.05;
 /** Interactor id used when gaze is synthesized from the head pose. */
@@ -90,6 +95,12 @@ export interface InteractionRuntimeOptions {
   provider: InputProvider;
   hitTester?: HitTester;
   dwellDefaults?: DwellConfig;
+  /**
+   * Per-source velocity tracking. On by default with no smoothing; pass
+   * `false` to skip it, or options to smooth. The tracker only fills in
+   * what the provider did not supply.
+   */
+  velocity?: VelocityTrackerOptions | false;
 }
 
 export interface RegisterPorts {
@@ -105,7 +116,9 @@ export class InteractionRuntime {
   private readonly sourceStates = new Map<string, SourceRuntimeState>();
   private readonly events = new Emitter<InteractionEvent>();
   private readonly feedbackEmitter = new Emitter<FeedbackIntent>();
-  private readonly afterSample = new Emitter<readonly InputSourceSnapshot[]>();
+  private readonly afterSample = new Emitter<readonly InputSourceSnapshotWithVelocity[]>();
+  private readonly velocityTracker: VelocityTracker | null;
+  private lastSources = new Map<string, InputSourceSnapshotWithVelocity>();
   private capabilities: InputCapabilities;
   private readonly unsubscribeCaps: Unsubscribe;
   private disposed = false;
@@ -119,6 +132,8 @@ export class InteractionRuntime {
       decayFactor: d?.decayFactor ?? DWELL_DEFAULTS.decayFactor,
       rearmBelow: d?.rearmBelow ?? DWELL_DEFAULTS.rearmBelow,
     };
+    this.velocityTracker =
+      options.velocity === false ? null : new VelocityTracker(options.velocity ?? {});
     this.capabilities = this.provider.getCapabilities();
     this.unsubscribeCaps = this.provider.onCapabilitiesChanged((caps) => {
       this.capabilities = caps;
@@ -221,6 +236,22 @@ export class InteractionRuntime {
     return this.afterSample.subscribe(listener);
   }
 
+  /**
+   * This frame's sources, velocity included. The same stream as
+   * {@link onSourcesSampled} with the velocity fields declared.
+   */
+  onSample(listener: (sources: readonly InputSourceSnapshotWithVelocity[]) => void): Unsubscribe {
+    return this.afterSample.subscribe(listener);
+  }
+
+  /**
+   * The last sample of one source, velocity included. Undefined before the
+   * first update, and once the source stops reporting.
+   */
+  getSource(id: string): InputSourceSnapshotWithVelocity | undefined {
+    return this.lastSources.get(id);
+  }
+
   getCapabilities(): InputCapabilities {
     return this.capabilities;
   }
@@ -233,8 +264,10 @@ export class InteractionRuntime {
 
   update(dt: number): void {
     if (this.disposed) return;
-    const sources = this.provider.sample();
+    const sampled = this.provider.sample();
+    const sources = this.velocityTracker ? this.velocityTracker.update(sampled, dt) : sampled;
     const hints = this.provider.sampleHints?.() ?? [];
+    this.lastSources = new Map(sources.map((source) => [source.id, source]));
     this.afterSample.emit(sources);
 
     const hintBySource = new Map<string, InputHitHint[]>();
@@ -266,6 +299,8 @@ export class InteractionRuntime {
     this.unsubscribeCaps();
     this.interactables.clear();
     this.sourceStates.clear();
+    this.lastSources.clear();
+    this.velocityTracker?.reset();
   }
 
   // -- internals ---------------------------------------------------------------

@@ -22,6 +22,7 @@
     "paths": {
       "@realitycollective/webxr-interactions": ["./packages/webxr-interactions/src/index.ts"],
       "@realitycollective/threejs-interactions": ["./packages/threejs-interactions/src/index.ts"],
+      "@realitycollective/babylon-interactions": ["./packages/babylon-interactions/src/index.ts"],
       "@realitycollective/iwsdk-interactions": ["./packages/iwsdk-interactions/src/index.ts"],
       "@realitycollective/xrblocks-interactions": ["./packages/xrblocks-interactions/src/index.ts"]
     }

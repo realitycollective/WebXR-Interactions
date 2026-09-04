@@ -52,3 +52,31 @@ export function routeHapticsToProvider(
     provider.pulse?.(intent.sourceId, Math.min(1, intent.intensity * scale), intent.durationMs);
   });
 }
+
+/**
+ * Whatever the client uses to play a sound. Deliberately tiny: an id the
+ * client resolved to a buffer/sample of its own, and a gain. The core
+ * never loads, decodes or owns audio.
+ */
+export interface FeedbackAudioSink {
+  play(cueId: string, options?: { gain?: number }): void;
+}
+
+/**
+ * Client opt-in: play a sound for the feedback intents named in `cueMap`.
+ * Cues absent from the map are ignored, so an app sonifies only the
+ * moments it has sounds for. Gain is the intent's intensity scaled by
+ * `gainScale`, capped at 1. Returns the unsubscribe.
+ */
+export function routeAudioToSink(
+  onFeedback: (listener: FeedbackListener) => Unsubscribe,
+  sink: FeedbackAudioSink,
+  cueMap: Partial<Record<FeedbackCue, string>>,
+  gainScale = 1,
+): Unsubscribe {
+  return onFeedback((intent) => {
+    const cueId = cueMap[intent.cue];
+    if (cueId === undefined) return;
+    sink.play(cueId, { gain: Math.min(1, intent.intensity * gainScale) });
+  });
+}

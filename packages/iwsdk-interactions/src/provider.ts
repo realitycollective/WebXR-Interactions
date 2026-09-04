@@ -35,7 +35,65 @@ export interface IWSDKProviderOptions {
 type Side = "left" | "right";
 const SIDES: readonly Side[] = ["left", "right"];
 
+/** Which side's visuals a presence call targets. `"all"` is both. */
+export type PresenceTarget = "left" | "right" | "none" | "all";
+
+/**
+ * Which family of visuals presence shows. `"auto"` follows the engine:
+ * hand visuals while hand tracking is live, controller visuals otherwise.
+ */
+export type PresenceModality = "hands" | "controllers" | "auto";
+
+/**
+ * Structural slice of `world.input.xr.visualAdapters`. Only two fields are
+ * needed and the real typings drag the whole `@iwsdk/xr-input` visual
+ * stack in for them, so the shape is declared here. A per-side adapter,
+ * and its `visual`, are both absent until that input source connects.
+ */
+interface PresenceObjectLike {
+  visible: boolean;
+  children?: readonly PresenceObjectLike[];
+}
+
+interface PresenceAdapterLike {
+  visual?: { model?: PresenceObjectLike } | undefined;
+}
+
+interface PresenceAdaptersLike {
+  controller?: Partial<Record<Side, PresenceAdapterLike | undefined>> | undefined;
+  hand?: Partial<Record<Side, PresenceAdapterLike | undefined>> | undefined;
+}
+
+/**
+ * Show or hide a visual by walking its DESCENDANTS rather than setting
+ * `visible` on the root.
+ *
+ * Verified against `@iwsdk/xr-input` 0.5.3 (`dist/xr-input-manager.js`, the
+ * per-frame update): IWSDK writes `visualAdapter.visual.model.visible =
+ * inputSourceData.isPrimary` every frame, so a root-level write is undone
+ * before it is drawn. The engine never touches the descendants, so hiding
+ * them is the write that sticks, independent of system ordering.
+ */
+function setDescendantsVisible(adapter: PresenceAdapterLike | undefined, visible: boolean): void {
+  const model = adapter?.visual?.model;
+  if (!model) return;
+  const stack: PresenceObjectLike[] = [...(model.children ?? [])];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    node.visible = visible;
+    for (const child of node.children ?? []) stack.push(child);
+  }
+}
+
 export class IWSDKInputProvider implements InputProvider {
+  /**
+   * This provider can show and hide the controller/hand visuals.
+   * Becomes `capabilities.presence` at
+   * `@realitycollective/webxr-input` 0.1.1.
+   */
+  readonly supportsPresence = true;
+
   private readonly world: World;
   private readonly nativeGrab: boolean;
   private capabilities: InputCapabilities;
@@ -43,6 +101,12 @@ export class IWSDKInputProvider implements InputProvider {
   private readonly sourceListeners = new Set<() => void>();
   private hints: InputHitHint[] = [];
   private readonly nativeGrabbing: Record<Side, boolean> = { left: false, right: false };
+  /** Snapshot id -> side, filled by `sample()` so `pulse` need not parse ids. */
+  private readonly sideBySourceId = new Map<string, Side>();
+  private readonly presenceVisible: Record<Side, boolean> = { left: true, right: true };
+  private presenceModality: PresenceModality = "auto";
+  /** Presence is only re-applied once a client has actually asked for it. */
+  private presenceRequested = false;
   private readonly disposers: Unsubscribe[] = [];
   private boundSession: XRSession | null = null;
   private readonly onSourcesChange = () => {
@@ -141,6 +205,10 @@ export class IWSDKInputProvider implements InputProvider {
   }
 
   sample(): readonly InputSourceSnapshot[] {
+    this.sideBySourceId.clear();
+    // Adapters are created as input sources connect, which can be after the
+    // client set its presence, so the desired state is re-applied here.
+    if (this.presenceRequested) this.applyPresence();
     if (!this.world.session) return [];
     if (this.world.visibilityState.peek() !== VisibilityState.Visible) return [];
 
@@ -192,9 +260,64 @@ export class IWSDKInputProvider implements InputProvider {
       if ((gamepad?.gamepad?.hapticActuators?.length ?? 0) > 0) {
         snapshot.hapticsAvailable = true;
       }
+      this.sideBySourceId.set(snapshot.id, side);
       snapshots.push(snapshot);
     }
     return snapshots;
+  }
+
+  // -- presence ---------------------------------------------------------------
+
+  /**
+   * Show or hide this session's controller/hand visuals. Returns false when
+   * IWSDK has published no visual adapters, which is the case outside a
+   * session. The request is remembered and re-applied on every sample, so
+   * a call made before the adapters exist still lands.
+   *
+   * `"none"` targets no side - the handedness value that has no visual
+   * here - so the call reports availability without changing anything.
+   */
+  setPresenceVisible(target: PresenceTarget, visible: boolean): boolean {
+    this.presenceRequested = true;
+    for (const side of SIDES) {
+      if (target === "all" || target === side) this.presenceVisible[side] = visible;
+    }
+    return this.applyPresence();
+  }
+
+  /**
+   * Choose which family of visuals is shown. `"hands"` and `"controllers"`
+   * force one family and hide the other; `"auto"` follows the engine's own
+   * modality (hand visuals while hand tracking is live).
+   */
+  setPresenceModality(mode: PresenceModality): boolean {
+    this.presenceRequested = true;
+    this.presenceModality = mode;
+    return this.applyPresence();
+  }
+
+  private visualAdapters(): PresenceAdaptersLike | null {
+    const xr = this.world.input?.xr as unknown as
+      | { visualAdapters?: PresenceAdaptersLike }
+      | undefined;
+    return xr?.visualAdapters ?? null;
+  }
+
+  private applyPresence(): boolean {
+    const adapters = this.visualAdapters();
+    if (!adapters) return false;
+    const hands =
+      this.presenceModality === "hands" ||
+      (this.presenceModality === "auto" && this.capabilities.handJoints);
+    const controllers =
+      this.presenceModality === "controllers" ||
+      (this.presenceModality === "auto" && !this.capabilities.handJoints);
+    for (const side of SIDES) {
+      const wanted = this.presenceVisible[side];
+      setDescendantsVisible(adapters.hand?.[side], wanted && hands);
+      setDescendantsVisible(adapters.controller?.[side], wanted && controllers);
+    }
+    return true;
   }
 
   getHeadPose(): HeadPose {
@@ -209,7 +332,12 @@ export class IWSDKInputProvider implements InputProvider {
   }
 
   pulse(sourceId: string, intensity: number, durationMs: number): boolean {
-    const side = sourceId.startsWith("left") ? "left" : sourceId.startsWith("right") ? "right" : null;
+    // The side comes from the handedness recorded when the snapshot was
+    // built. Parsing the id is the fallback for an id this provider did not
+    // produce (a caller's own naming, or a pulse before the first sample).
+    const side =
+      this.sideBySourceId.get(sourceId) ??
+      (sourceId.startsWith("left") ? "left" : sourceId.startsWith("right") ? "right" : null);
     if (!side) return false;
     const actuator = this.world.input.xr.gamepads[side]?.gamepad?.hapticActuators?.[0];
     if (!actuator) return false;
@@ -223,6 +351,8 @@ export class IWSDKInputProvider implements InputProvider {
   dispose(): void {
     this.boundSession?.removeEventListener("inputsourceschange", this.onSourcesChange);
     for (const dispose of this.disposers) dispose();
+    this.disposers.length = 0;
+    this.sideBySourceId.clear();
   }
 }
 

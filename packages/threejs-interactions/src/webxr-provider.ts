@@ -11,7 +11,15 @@
  * Capabilities are derived from the LIVE session (never the requested
  * config) and re-published on session start/end and input-source changes.
  */
-import { Raycaster, Vector2, Vector3, Quaternion, type Camera, type WebXRManager } from "three";
+import {
+  Raycaster,
+  Vector2,
+  Vector3,
+  Quaternion,
+  type Camera,
+  type Object3D,
+  type WebXRManager,
+} from "three";
 import {
   NO_CAPABILITIES,
   type HeadPose,
@@ -21,6 +29,8 @@ import {
   type PoseTuple,
   type Unsubscribe,
 } from "@realitycollective/webxr-input";
+// Collapses into `InputSourceSnapshot` at `@realitycollective/webxr-input` 0.1.1, which adds the two velocity fields.
+import type { InputSourceSnapshotWithVelocity } from "@realitycollective/webxr-interactions";
 
 export interface WebXRProviderContext {
   /** three.js `renderer.xr` (or anything with the same session surface). */
@@ -57,6 +67,15 @@ interface SelectState {
   squeezing: boolean;
 }
 
+/** Which side's visual a presence call targets. `"all"` is both. */
+export type PresenceTarget = "left" | "right" | "none" | "all";
+
+/**
+ * Which family of visuals presence shows. This provider does not build
+ * controller or hand models, so it cannot switch between them.
+ */
+export type PresenceModality = "hands" | "controllers" | "auto";
+
 /** Where the desktop fallback puts its synthetic grip along the mouse ray. */
 const DEFAULT_DESKTOP_GRIP_DISTANCE = 1;
 
@@ -69,6 +88,7 @@ export class WebXRInputProvider implements InputProvider {
   private readonly capsListeners = new Set<(c: InputCapabilities) => void>();
   private readonly sourceListeners = new Set<() => void>();
   private readonly selectStates = new Map<XRInputSource, SelectState>();
+  private readonly visuals = new Map<"left" | "right", Object3D>();
   private boundSession: XRSession | null = null;
   private readonly sessionHandlers: Array<[string, EventListener]> = [];
 
@@ -260,12 +280,12 @@ export class WebXRInputProvider implements InputProvider {
     const referenceSpace = this.context.xr.getReferenceSpace();
     if (!frame || !referenceSpace) return [];
 
-    const snapshots: InputSourceSnapshot[] = [];
+    const snapshots: InputSourceSnapshotWithVelocity[] = [];
     let index = 0;
     for (const source of session.inputSources) {
       const state = this.selectState(source);
       const id = `${source.handedness}-${source.hand ? "hand" : "controller"}-${index++}`;
-      const snapshot: InputSourceSnapshot = {
+      const snapshot: InputSourceSnapshotWithVelocity = {
         id,
         kind: source.hand ? "hand" : "controller",
         handedness:
@@ -289,7 +309,10 @@ export class WebXRInputProvider implements InputProvider {
       }
       if (source.gripSpace) {
         const gripPose = frame.getPose(source.gripSpace, referenceSpace);
-        if (gripPose) snapshot.gripPose = xrPoseToTuple(gripPose);
+        if (gripPose) {
+          snapshot.gripPose = xrPoseToTuple(gripPose);
+          applyPoseVelocity(snapshot, gripPose);
+        }
       }
       if (source.hand) {
         const joint = source.hand.get("index-finger-tip");
@@ -302,7 +325,10 @@ export class WebXRInputProvider implements InputProvider {
         if (!snapshot.gripPose) {
           const wrist = source.hand.get("wrist");
           const wristPose = wrist ? frame.getJointPose?.(wrist, referenceSpace) : undefined;
-          if (wristPose) snapshot.gripPose = xrPoseToTuple(wristPose);
+          if (wristPose) {
+            snapshot.gripPose = xrPoseToTuple(wristPose);
+            applyPoseVelocity(snapshot, wristPose);
+          }
         }
       }
       if ((source.gamepad?.hapticActuators?.length ?? 0) > 0) {
@@ -386,6 +412,56 @@ export class WebXRInputProvider implements InputProvider {
     };
   }
 
+  // -- presence -----------------------------------------------------------------
+
+  /**
+   * Hand the provider the scene object that represents one side's hand or
+   * controller, so presence can hide and show it. Nothing here builds those
+   * models: a standalone three.js app owns its own, and this is the hook
+   * that lets it be driven from the same place as an IWSDK app's.
+   *
+   * Registering the same side twice replaces the previous root.
+   */
+  registerVisual(handedness: "left" | "right", root: Object3D): void {
+    this.visuals.set(handedness, root);
+  }
+
+  /**
+   * True once a visual has been registered. Becomes `capabilities.presence`
+   * at `@realitycollective/webxr-input` 0.1.1.
+   */
+  get supportsPresence(): boolean {
+    return this.visuals.size > 0;
+  }
+
+  /**
+   * Show or hide registered visuals. Returns false when the targeted side
+   * has no registered visual. `"none"` targets no side, so it reports
+   * whether presence is usable at all without changing anything.
+   */
+  setPresenceVisible(target: PresenceTarget, visible: boolean): boolean {
+    if (target === "none") return this.visuals.size > 0;
+    let applied = false;
+    for (const side of ["left", "right"] as const) {
+      if (target !== "all" && target !== side) continue;
+      const root = this.visuals.get(side);
+      if (!root) continue;
+      root.visible = visible;
+      applied = true;
+    }
+    return applied;
+  }
+
+  /**
+   * Always false. Switching between hand and controller models means owning
+   * both, and this provider owns neither - the app registered one root per
+   * side and decides for itself what that root contains. IWSDK builds both
+   * families, so its adapter implements this.
+   */
+  setPresenceModality(_mode: PresenceModality): boolean {
+    return false;
+  }
+
   pulse(sourceId: string, intensity: number, durationMs: number): boolean {
     const session = this.boundSession;
     if (!session) return false;
@@ -418,4 +494,21 @@ function xrPoseToTuple(pose: XRPose): PoseTuple {
   const p = pose.transform.position;
   const o = pose.transform.orientation;
   return { position: [p.x, p.y, p.z], quaternion: [o.x, o.y, o.z, o.w] };
+}
+
+/**
+ * Pass the platform's own velocity through when it reports one.
+ *
+ * `XRPose.linearVelocity` (metres per second) and `angularVelocity` (radians
+ * per second about each axis) are optional, and undefined on a user agent that
+ * does not compute them. Both are expressed in the reference space the pose was
+ * taken in, which is the space the snapshot's grip pose already uses. What is
+ * left undefined here is filled in by the core's `VelocityTracker`, which
+ * differentiates consecutive grip poses and never overwrites a supplied value.
+ */
+function applyPoseVelocity(snapshot: InputSourceSnapshotWithVelocity, pose: XRPose): void {
+  const linear = pose.linearVelocity;
+  if (linear) snapshot.linearVelocity = [linear.x, linear.y, linear.z];
+  const angular = pose.angularVelocity;
+  if (angular) snapshot.angularVelocity = [angular.x, angular.y, angular.z];
 }

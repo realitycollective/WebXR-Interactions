@@ -12,7 +12,7 @@
     "three": "npm:super-three@0.181.0"
   },
   "scripts": {
-    "build": "npm --workspace @realitycollective/webxr-interactions run build && npm --workspace @realitycollective/threejs-interactions run build && npm --workspace @realitycollective/iwsdk-interactions run build && npm --workspace @realitycollective/xrblocks-interactions run build",
+    "build": "npm --workspace @realitycollective/webxr-interactions run build && npm --workspace @realitycollective/threejs-interactions run build && npm --workspace @realitycollective/babylon-interactions run build && npm --workspace @realitycollective/iwsdk-interactions run build && npm --workspace @realitycollective/xrblocks-interactions run build",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run --coverage",
     "test:watch": "vitest",

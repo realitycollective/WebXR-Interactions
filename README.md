@@ -18,6 +18,7 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 | [`@realitycollective/webxr-input`](https://github.com/realitycollective/WebXR-Input) | Shared TypeScript types describing input devices. Published from its own repository. Everything below depends on it. |
 | `@realitycollective/webxr-interactions` | The core. All the interaction logic, with no 3D engine code. |
 | `@realitycollective/threejs-interactions` | Adapter for plain three.js and raw WebXR. No other framework needed. |
+| `@realitycollective/babylon-interactions` | Adapter for Babylon.js. Not yet run against a real Babylon app. |
 | `@realitycollective/iwsdk-interactions` | Adapter for Meta's Immersive Web SDK. |
 | `@realitycollective/xrblocks-interactions` | Adapter for Google's XR Blocks. Experimental, and the API may change. |
 
@@ -27,14 +28,16 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 - **Gaze** - optional look-to-activate. Either require the user to be looking at an object before it responds, or let a sustained look trigger the press on its own.
 - **Targeting** - for each hand or controller the core picks one target, trying the platform's own answer first, then a close-range touch, then a pointing ray. A short delay stops the target flickering between two objects on the boundary.
 - **Capability checks** - if the current headset cannot do what a behaviour needs, the behaviour switches itself off and says so, rather than silently doing nothing.
+- **Velocity** - how fast each hand or controller is moving, measured from the poses the core already samples, so a throw or a flick has a speed to work with. A source on its first frame, or one that has just reappeared, reports nothing rather than a jump from wherever it was last seen. A platform that reports its own velocity keeps it.
 - **Events only** - the core never calls into your code. It emits events and you subscribe.
-- **Feedback as a request** - the core asks for a haptic pulse or a sound. Playing it is your app's job. `routeHapticsToProvider` is an opt-in helper that sends those requests straight to the controller.
+- **Feedback as a request** - the core asks for a haptic pulse or a sound. Playing it is your app's job. `routeHapticsToProvider` is an opt-in helper that sends those requests straight to the controller, and `routeAudioToSink` hands the cues you name to whatever plays sound in your app.
 
 ### What each adapter adds
 
-- **three.js** - reads raw WebXR directly: controllers, hand joints, trigger and grip pressure, and haptic pulses. Adds three.js hit-testing and object movement, plus a desktop mouse fallback so you can test without a headset.
-- **Meta IWSDK** - uses IWSDK's own player rig and controller state. IWSDK already knows what is being pressed or grabbed, so the adapter passes that answer straight through instead of working it out again. Where the app has IWSDK grabbing or physics turned on, IWSDK performs the grab. Setup is one call: `registerInteractions(world)`.
-- **XR Blocks** - matches the shape of the XR Blocks API in TypeScript without depending on the `xrblocks` package, so an upstream release cannot break the install. XR Blocks reuses the same input objects every frame, so the adapter copies the values out immediately. XR Blocks has no haptics, so haptic requests go unfulfilled.
+- **three.js** - reads raw WebXR directly: controllers, hand joints, trigger and grip pressure, and haptic pulses. Where the browser reports velocity with a pose, that velocity is passed through as the platform gave it; where it does not, the core derives one from the poses. Adds three.js hit-testing and object movement, plus a desktop mouse fallback so you can test without a headset. The mouse source reports `handedness: "none"` and puts its grip on the camera ray, so its velocity is camera motion rather than hand motion - gate hand mechanics such as throwing on `handedness !== "none"`. Your app builds its own hand and controller models here, so presence is opt-in: register a model per hand with `registerVisual` and the adapter can then show and hide it.
+- **Babylon.js** - matches the shape of the Babylon API in TypeScript without depending on `@babylonjs/core`, the same way the XR Blocks adapter does, so an upstream release cannot break the install. It reads a `WebXRDefaultExperience`: controllers, motion controller trigger and grip, and hand-tracking joints, with the scene's own pointer as a desktop fallback. Haptics go through the motion controller's pulse. Presence shows and hides the visuals Babylon built - motion controller root meshes and hand meshes - but Babylon picks which of those to show per input source, so there is no hands-or-controllers switch. Hit-testing is a sphere test over the registered nodes; hand the adapter your own `scene.pickWithRay` for mesh-accurate targeting. Written against the documented API and covered by structural fakes: it has not yet been exercised against a real Babylon runtime.
+- **Meta IWSDK** - uses IWSDK's own player rig and controller state. IWSDK already knows what is being pressed or grabbed, so the adapter passes that answer straight through instead of working it out again. Where the app has IWSDK grabbing or physics turned on, IWSDK performs the grab. IWSDK builds the hand and controller models, so presence is full: hide or show either hand, and force hands or controllers when the automatic choice is wrong. Setup is one call: `registerInteractions(world)`.
+- **XR Blocks** - matches the shape of the XR Blocks API in TypeScript without depending on the `xrblocks` package, so an upstream release cannot break the install. XR Blocks reuses the same input objects every frame, so the adapter copies the values out immediately. XR Blocks has no haptics, so haptic requests go unfulfilled, and it exposes no way to hide its own hand and controller visuals, so there is no presence control either.
 
 ## Demo
 
@@ -64,7 +67,7 @@ Two workflows ship in every Reality Collective TypeScript repository, with the s
 | Workflow | Trigger | Does |
 | --- | --- | --- |
 | `ci.yml` | every PR + push to `main` / `development` | Build, typecheck, test with coverage gates, `verify:pack`, playground build. On a PR it then deploys to `webxr-interactions-test`; on a push to `main`, to production. The deploy steps skip when the Cloudflare secrets are absent, leaving a pure build gate |
-| `publish-npm.yml` | manual dispatch | packs all four packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
+| `publish-npm.yml` | manual dispatch | packs all five packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
 
 ## Commands
 
@@ -100,7 +103,15 @@ To develop against an unreleased `webxr-input`, use `npm link` rather than editi
 ## Layering rule
 
 ```
-app → ONE adapter (threejs | iwsdk | xrblocks) → core (webxr-interactions) → contracts (@realitycollective/webxr-input, separate repo)
+app → ONE adapter (threejs | babylon | iwsdk | xrblocks) → core (webxr-interactions) → contracts (@realitycollective/webxr-input, separate repo)
 ```
 
 Arrows only point down; the core's architecture test fails the moment an engine import lands in it. Physics deliberately stays with the client/app - adapters surface it only as the `grabs: "native"` capability.
+
+## What this stack is and is not
+
+The Reality Collective WebXR packages aim at one outcome: an app's logic, input handling, interactions and UI should not care which engine hosts them. Each family ships an engine-free core and thin adapters for Meta IWSDK, plain three.js and WebXR, Babylon.js and Google XR Blocks. When an app still has to reach into the host, either a contract is missing, which is a bug to report, or the app is overreaching.
+
+Portable world-building is not a current promise. Scene content (meshes, prefabs, placement) is built by the app, ideally behind a factory interface the app owns, so that a second host can implement the same factories. A shared content descriptor, following the shape of the UI family's `SceneDescriptor`, will be considered only when a second host is actually targeted. Meta's `iwsdk.scene.v1` format is an acceptable authoring interchange in the meantime.
+
+Position recorded on 2026-09-03 from the Pale Signal client's gaps report.

@@ -4,7 +4,7 @@
  * plus the tuple vector/quaternion helpers the binder and behaviours need.
  * No engine imports; everything is unit-tested headless.
  */
-import type { QuatTuple, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
+import type { PoseTuple, QuatTuple, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 
 /** Clamp to the unit interval. */
 export function clamp01(t: number): number {
@@ -204,4 +204,39 @@ export function rayAngleTo(ray: RayTuple, point: Vec3Tuple): number {
   const dir = vNormalize(vSub(point, ray.origin));
   const d = vDot(vNormalize(ray.direction), dir);
   return Math.acos(Math.min(1, Math.max(-1, d)));
+}
+
+/**
+ * Linear and angular velocity between two poses, in metres per second and
+ * radians per second. Linear is the position delta over `dtSeconds`;
+ * angular comes from the delta quaternion `next * conj(prev)`, taken along
+ * the shortest arc, as `axis * angle / dtSeconds`. Returns zeros when
+ * `dtSeconds` is zero, negative or not finite.
+ *
+ * Mirrors velocityBetween in @realitycollective/webxr-input 0.1.1; switch
+ * to the import once that ships.
+ */
+export function poseVelocity(
+  prev: PoseTuple,
+  next: PoseTuple,
+  dtSeconds: number,
+): { linear: Vec3Tuple; angular: Vec3Tuple } {
+  if (!Number.isFinite(dtSeconds) || dtSeconds <= 0) {
+    return { linear: [0, 0, 0], angular: [0, 0, 0] };
+  }
+  const linear = vScale(vSub(next.position, prev.position), 1 / dtSeconds);
+  let delta = quatMultiply(next.quaternion, quatConjugate(prev.quaternion));
+  // Shortest arc: q and -q are the same rotation, so flip to the hemisphere
+  // where the angle is under half a turn.
+  if (delta[3] < 0) delta = [-delta[0], -delta[1], -delta[2], -delta[3]];
+  const w = delta[3] < -1 ? -1 : delta[3] > 1 ? 1 : delta[3];
+  const angle = 2 * Math.acos(w);
+  // vNormalize guards the near-zero axis (no rotation this frame).
+  const axis = vNormalize([delta[0], delta[1], delta[2]]);
+  return { linear, angular: vScale(axis, angle / dtSeconds) };
+}
+
+/** Zero out a signal below `threshold`, leaving larger values untouched. */
+export function clampDeadzone(value: number, threshold: number): number {
+  return Math.abs(value) < threshold ? 0 : value;
 }
