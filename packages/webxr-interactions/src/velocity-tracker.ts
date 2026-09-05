@@ -13,20 +13,12 @@
  * that frame, so a reconnecting controller cannot report a metres-per-
  * second jump from wherever it was last seen.
  */
-import type { InputSourceSnapshot, PoseTuple, Vec3Tuple } from "@realitycollective/webxr-input";
-import { poseVelocity } from "./math.js";
-
-/**
- * A sampled source carrying the velocity the tracker measured.
- * Collapses into `InputSourceSnapshot` in
- * `@realitycollective/webxr-input` 0.1.1, which adds these two fields.
- */
-export type InputSourceSnapshotWithVelocity = InputSourceSnapshot & {
-  /** Metres per second, world space. */
-  linearVelocity?: Vec3Tuple;
-  /** Radians per second about each world axis. */
-  angularVelocity?: Vec3Tuple;
-};
+import {
+  velocityBetween,
+  type InputSourceSnapshot,
+  type PoseTuple,
+  type Vec3Tuple,
+} from "@realitycollective/webxr-input";
 
 export interface VelocityTrackerOptions {
   /**
@@ -60,12 +52,9 @@ export class VelocityTracker {
    * added to those the provider left without it. Sources with no grip pose
    * pass through untouched and hold no state.
    */
-  update(
-    sources: readonly InputSourceSnapshot[],
-    dt: number,
-  ): readonly InputSourceSnapshotWithVelocity[] {
+  update(sources: readonly InputSourceSnapshot[], dt: number): readonly InputSourceSnapshot[] {
     const seen = new Set<string>();
-    const out: InputSourceSnapshotWithVelocity[] = [];
+    const out: InputSourceSnapshot[] = [];
 
     for (const source of sources) {
       const pose = source.gripPose;
@@ -89,7 +78,7 @@ export class VelocityTracker {
         continue;
       }
 
-      const raw = poseVelocity(previous.pose, pose, dt);
+      const raw = velocityBetween(previous.pose, pose, dt);
       const linear = smooth(previous.linear, raw.linear, this.smoothing);
       const angular = smooth(previous.angular, raw.angular, this.smoothing);
       stored.linear = linear;
@@ -98,15 +87,14 @@ export class VelocityTracker {
 
       // The provider's own numbers always win - it may have them from the
       // platform, which knows better than a difference of two samples.
-      const supplied = source as InputSourceSnapshotWithVelocity;
-      const needsLinear = supplied.linearVelocity === undefined;
-      const needsAngular = supplied.angularVelocity === undefined;
+      const needsLinear = source.linearVelocity === undefined;
+      const needsAngular = source.angularVelocity === undefined;
       if (!needsLinear && !needsAngular) {
         out.push(source);
         continue;
       }
       out.push({
-        ...supplied,
+        ...source,
         ...(needsLinear ? { linearVelocity: linear } : {}),
         ...(needsAngular ? { angularVelocity: angular } : {}),
       });

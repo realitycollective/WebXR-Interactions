@@ -15,15 +15,15 @@
  */
 import {
   NO_CAPABILITIES,
+  type Handedness,
   type HeadPose,
   type InputCapabilities,
   type InputProvider,
   type InputSourceSnapshot,
+  type PresenceModality,
   type Unsubscribe,
   type Vec3Tuple,
 } from "@realitycollective/webxr-input";
-// Collapses into `InputSourceSnapshot` at `@realitycollective/webxr-input` 0.1.1, which adds the two velocity fields.
-import type { InputSourceSnapshotWithVelocity } from "@realitycollective/webxr-interactions";
 import {
   HAND_TRACKING_FEATURE,
   INDEX_TIP_JOINT,
@@ -63,15 +63,6 @@ export interface BabylonProviderOptions {
    */
   desktopGripDistance?: number;
 }
-
-/** Which side's visual a presence call targets. `"all"` is both. */
-export type PresenceTarget = "left" | "right" | "none" | "all";
-
-/**
- * Which family of visuals presence shows. Babylon chooses this per input
- * source, so this provider reports every mode as unavailable.
- */
-export type PresenceModality = "hands" | "controllers" | "auto";
 
 /** Trigger, then the main component, then nothing. */
 const TRIGGER_COMPONENT = "trigger";
@@ -217,6 +208,10 @@ export class BabylonInputProvider implements InputProvider {
       // behaviours negotiate on desktop too. Without this every one of them
       // switches itself off off-headset and only press remains usable.
       grabs: desktop ? "poseOnly" : NO_CAPABILITIES.grabs,
+      // Set in the loop below: presence is true once Babylon has built at
+      // least one visual this provider can hide - a motion controller root
+      // mesh, or a hand mesh from the hand-tracking feature.
+      presence: false,
     };
     if (inSession) {
       for (const controller of this.controllers()) {
@@ -233,6 +228,7 @@ export class BabylonInputProvider implements InputProvider {
         if ((controller.inputSource.gamepad?.hapticActuators?.length ?? 0) > 0) {
           next.haptics = true;
         }
+        if (this.visualsFor(controller).length > 0) next.presence = true;
       }
     }
     const changed = JSON.stringify(next) !== JSON.stringify(this.capabilities);
@@ -266,12 +262,12 @@ export class BabylonInputProvider implements InputProvider {
       return this.samplePointer();
     }
 
-    const snapshots: InputSourceSnapshotWithVelocity[] = [];
+    const snapshots: InputSourceSnapshot[] = [];
     for (const controller of this.controllers()) {
       const handedness = normalizeHandedness(controller.inputSource.handedness);
       const hand = this.handFor(controller);
       const pointerNode = controller.pointer;
-      const snapshot: InputSourceSnapshotWithVelocity = {
+      const snapshot: InputSourceSnapshot = {
         id: controller.uniqueId,
         kind: controller.inputSource.hand ? "hand" : "controller",
         handedness,
@@ -379,26 +375,13 @@ export class BabylonInputProvider implements InputProvider {
   // -- presence -----------------------------------------------------------------
 
   /**
-   * True when Babylon has built at least one visual this provider can hide:
-   * a motion controller root mesh, or a hand mesh from the hand-tracking
-   * feature. Becomes `capabilities.presence` at
-   * `@realitycollective/webxr-input` 0.1.1.
-   */
-  get supportsPresence(): boolean {
-    for (const controller of this.controllers()) {
-      if (this.visualsFor(controller).length > 0) return true;
-    }
-    return false;
-  }
-
-  /**
    * Show or hide the visuals Babylon built for the targeted sides. Returns
    * false when the target has nothing to show or hide. `"none"` targets no
    * side, so it reports whether presence is usable at all without changing
    * anything.
    */
-  setPresenceVisible(target: PresenceTarget, visible: boolean): boolean {
-    if (target === "none") return this.supportsPresence;
+  setPresenceVisible(target: Handedness | "all", visible: boolean): boolean {
+    if (target === "none") return this.capabilities.presence;
     let applied = false;
     for (const controller of this.controllers()) {
       const side = normalizeHandedness(controller.inputSource.handedness);

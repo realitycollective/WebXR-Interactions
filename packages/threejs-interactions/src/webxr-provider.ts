@@ -22,15 +22,15 @@ import {
 } from "three";
 import {
   NO_CAPABILITIES,
+  type Handedness,
   type HeadPose,
   type InputCapabilities,
   type InputProvider,
   type InputSourceSnapshot,
   type PoseTuple,
+  type PresenceModality,
   type Unsubscribe,
 } from "@realitycollective/webxr-input";
-// Collapses into `InputSourceSnapshot` at `@realitycollective/webxr-input` 0.1.1, which adds the two velocity fields.
-import type { InputSourceSnapshotWithVelocity } from "@realitycollective/webxr-interactions";
 
 export interface WebXRProviderContext {
   /** three.js `renderer.xr` (or anything with the same session surface). */
@@ -66,15 +66,6 @@ interface SelectState {
   selecting: boolean;
   squeezing: boolean;
 }
-
-/** Which side's visual a presence call targets. `"all"` is both. */
-export type PresenceTarget = "left" | "right" | "none" | "all";
-
-/**
- * Which family of visuals presence shows. This provider does not build
- * controller or hand models, so it cannot switch between them.
- */
-export type PresenceModality = "hands" | "controllers" | "auto";
 
 /** Where the desktop fallback puts its synthetic grip along the mouse ray. */
 const DEFAULT_DESKTOP_GRIP_DISTANCE = 1;
@@ -230,6 +221,10 @@ export class WebXRInputProvider implements InputProvider {
       // this `grabs` stays "none" off-headset and capability negotiation
       // disables every one of them, leaving press as the only usable behaviour.
       grabs: desktop ? "poseOnly" : NO_CAPABILITIES.grabs,
+      // Presence is opt-in here and nowhere else: a standalone three.js app
+      // builds its own hand and controller models, so there is nothing to
+      // show or hide until one is handed over with `registerVisual`.
+      presence: this.visuals.size > 0,
     };
     if (session) {
       for (const source of session.inputSources) {
@@ -280,12 +275,12 @@ export class WebXRInputProvider implements InputProvider {
     const referenceSpace = this.context.xr.getReferenceSpace();
     if (!frame || !referenceSpace) return [];
 
-    const snapshots: InputSourceSnapshotWithVelocity[] = [];
+    const snapshots: InputSourceSnapshot[] = [];
     let index = 0;
     for (const source of session.inputSources) {
       const state = this.selectState(source);
       const id = `${source.handedness}-${source.hand ? "hand" : "controller"}-${index++}`;
-      const snapshot: InputSourceSnapshotWithVelocity = {
+      const snapshot: InputSourceSnapshot = {
         id,
         kind: source.hand ? "hand" : "controller",
         handedness:
@@ -420,18 +415,25 @@ export class WebXRInputProvider implements InputProvider {
    * models: a standalone three.js app owns its own, and this is the hook
    * that lets it be driven from the same place as an IWSDK app's.
    *
-   * Registering the same side twice replaces the previous root.
+   * Registering the same side twice replaces the previous root. The first
+   * registration turns `capabilities.presence` on and notifies every
+   * capabilities listener, so an app can gate its presence UI on the
+   * capability like it does on every other one.
    */
   registerVisual(handedness: "left" | "right", root: Object3D): void {
     this.visuals.set(handedness, root);
+    this.refreshCapabilities();
   }
 
   /**
-   * True once a visual has been registered. Becomes `capabilities.presence`
-   * at `@realitycollective/webxr-input` 0.1.1.
+   * Give a side's visual back, for an app that tears its models down.
+   * Dropping the last one turns `capabilities.presence` off again.
+   * Returns false when that side had nothing registered.
    */
-  get supportsPresence(): boolean {
-    return this.visuals.size > 0;
+  unregisterVisual(handedness: "left" | "right"): boolean {
+    const removed = this.visuals.delete(handedness);
+    if (removed) this.refreshCapabilities();
+    return removed;
   }
 
   /**
@@ -439,7 +441,7 @@ export class WebXRInputProvider implements InputProvider {
    * has no registered visual. `"none"` targets no side, so it reports
    * whether presence is usable at all without changing anything.
    */
-  setPresenceVisible(target: PresenceTarget, visible: boolean): boolean {
+  setPresenceVisible(target: Handedness | "all", visible: boolean): boolean {
     if (target === "none") return this.visuals.size > 0;
     let applied = false;
     for (const side of ["left", "right"] as const) {
@@ -506,7 +508,7 @@ function xrPoseToTuple(pose: XRPose): PoseTuple {
  * left undefined here is filled in by the core's `VelocityTracker`, which
  * differentiates consecutive grip poses and never overwrites a supplied value.
  */
-function applyPoseVelocity(snapshot: InputSourceSnapshotWithVelocity, pose: XRPose): void {
+function applyPoseVelocity(snapshot: InputSourceSnapshot, pose: XRPose): void {
   const linear = pose.linearVelocity;
   if (linear) snapshot.linearVelocity = [linear.x, linear.y, linear.z];
   const angular = pose.angularVelocity;

@@ -3,10 +3,9 @@ import {
   InteractionRuntime,
   VelocityTracker,
   clampDeadzone,
-  poseVelocity,
+  velocityBetween,
   quatFromAxisAngle,
   type InputSourceSnapshot,
-  type InputSourceSnapshotWithVelocity,
   type PoseTuple,
 } from "@realitycollective/webxr-interactions";
 import { FakeProvider, handSource, raySource } from "./helpers.js";
@@ -21,15 +20,15 @@ function moving(id: string, x: number): InputSourceSnapshot {
   return handSource(id, { gripPose: pose(x, 1, -0.5) });
 }
 
-describe("poseVelocity", () => {
+describe("velocityBetween, re-exported from the input contracts", () => {
   it("differentiates position over dt", () => {
-    const { linear } = poseVelocity(pose(0), pose(0.5), 0.5);
+    const { linear } = velocityBetween(pose(0), pose(0.5), 0.5);
     expect(linear).toEqual([1, 0, 0]);
   });
 
   it("reports the rotation rate about the turn axis", () => {
     const half = Math.PI / 2;
-    const { angular } = poseVelocity(
+    const { angular } = velocityBetween(
       { position: [0, 0, 0], quaternion: quatFromAxisAngle([0, 1, 0], 0) },
       { position: [0, 0, 0], quaternion: quatFromAxisAngle([0, 1, 0], half) },
       0.5,
@@ -41,7 +40,7 @@ describe("poseVelocity", () => {
 
   it("takes the shortest arc past half a turn", () => {
     const turn = Math.PI * 1.5;
-    const { angular } = poseVelocity(
+    const { angular } = velocityBetween(
       { position: [0, 0, 0], quaternion: [0, 0, 0, 1] },
       { position: [0, 0, 0], quaternion: quatFromAxisAngle([0, 1, 0], turn) },
       1,
@@ -52,14 +51,14 @@ describe("poseVelocity", () => {
   });
 
   it("reports zero angular velocity when the pose did not rotate", () => {
-    const { angular } = poseVelocity(pose(0), pose(1), 1);
+    const { angular } = velocityBetween(pose(0), pose(1), 1);
     expect(angular).toEqual([0, 0, 0]);
   });
 
   it("returns zeros for a non-positive or non-finite dt", () => {
-    expect(poseVelocity(pose(0), pose(1), 0)).toEqual({ linear: [0, 0, 0], angular: [0, 0, 0] });
-    expect(poseVelocity(pose(0), pose(1), -1)).toEqual({ linear: [0, 0, 0], angular: [0, 0, 0] });
-    expect(poseVelocity(pose(0), pose(1), Number.NaN)).toEqual({
+    expect(velocityBetween(pose(0), pose(1), 0)).toEqual({ linear: [0, 0, 0], angular: [0, 0, 0] });
+    expect(velocityBetween(pose(0), pose(1), -1)).toEqual({ linear: [0, 0, 0], angular: [0, 0, 0] });
+    expect(velocityBetween(pose(0), pose(1), Number.NaN)).toEqual({
       linear: [0, 0, 0],
       angular: [0, 0, 0],
     });
@@ -149,7 +148,7 @@ describe("VelocityTracker", () => {
 
   it("leaves provider-supplied velocity alone", () => {
     const tracker = new VelocityTracker();
-    const supplied = (x: number): InputSourceSnapshotWithVelocity => ({
+    const supplied = (x: number): InputSourceSnapshot => ({
       ...moving("right-hand", x),
       linearVelocity: [9, 9, 9],
     });
@@ -162,7 +161,7 @@ describe("VelocityTracker", () => {
 
   it("fills in only the half the provider left out", () => {
     const tracker = new VelocityTracker();
-    const supplied = (x: number): InputSourceSnapshotWithVelocity => ({
+    const supplied = (x: number): InputSourceSnapshot => ({
       ...moving("right-hand", x),
       angularVelocity: [0, 5, 0],
     });
@@ -174,7 +173,7 @@ describe("VelocityTracker", () => {
 
   it("returns the source untouched when the provider supplied both", () => {
     const tracker = new VelocityTracker();
-    const supplied: InputSourceSnapshotWithVelocity = {
+    const supplied: InputSourceSnapshot = {
       ...moving("right-hand", 0),
       linearVelocity: [1, 0, 0],
       angularVelocity: [0, 1, 0],
@@ -205,7 +204,7 @@ describe("runtime velocity", () => {
 
   it("publishes measured velocity through onSample", () => {
     const { provider, runtime } = runtimeWith();
-    const frames: InputSourceSnapshotWithVelocity[][] = [];
+    const frames: InputSourceSnapshot[][] = [];
     runtime.onSample((sources) => frames.push([...sources]));
 
     provider.sources = [moving("right-hand", 0)];
@@ -216,6 +215,30 @@ describe("runtime velocity", () => {
     expect(frames).toHaveLength(2);
     expect(frames[0]?.[0]?.linearVelocity).toBeUndefined();
     expect(frames[1]?.[0]?.linearVelocity).toEqual([2, 0, 0]);
+  });
+
+  it("delivers the same stream through the deprecated onSourcesSampled", () => {
+    // Kept working for existing callers until a later major release. Nothing
+    // inside this package calls it any more, so it is covered directly here
+    // rather than incidentally through another feature's tests.
+    const { provider, runtime } = runtimeWith();
+    const viaDeprecated: InputSourceSnapshot[][] = [];
+    const viaCurrent: InputSourceSnapshot[][] = [];
+    const stop = runtime.onSourcesSampled((sources) => viaDeprecated.push([...sources]));
+    runtime.onSample((sources) => viaCurrent.push([...sources]));
+
+    provider.sources = [moving("right-hand", 0)];
+    runtime.update(1);
+    provider.sources = [moving("right-hand", 2)];
+    runtime.update(1);
+
+    expect(viaDeprecated).toEqual(viaCurrent);
+    expect(viaDeprecated[1]?.[0]?.linearVelocity).toEqual([2, 0, 0]);
+
+    stop();
+    runtime.update(1);
+    expect(viaDeprecated).toHaveLength(2);
+    expect(viaCurrent).toHaveLength(3);
   });
 
   it("stops publishing after unsubscribe", () => {

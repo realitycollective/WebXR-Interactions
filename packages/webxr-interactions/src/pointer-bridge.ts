@@ -40,7 +40,7 @@ export function createPointerBridge(
 
   let activeSourceId: string | null = null;
 
-  const unsubscribe = runtime.onSourcesSampled((sources) => {
+  const unsubscribe = runtime.onSample((sources) => {
     if (activeSourceId === null) {
       for (const source of sources) {
         if (!source.ray || !match(source.id)) continue;

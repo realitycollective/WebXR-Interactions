@@ -38,11 +38,7 @@ import type { FeedbackIntent, FeedbackListener } from "./feedback.js";
 import { DwellState, resolveDwellConfig, DWELL_DEFAULTS, type DwellConfig } from "./gaze.js";
 import { vApplyQuat } from "./math.js";
 import type { HitTester, TransformPort } from "./ports.js";
-import {
-  VelocityTracker,
-  type InputSourceSnapshotWithVelocity,
-  type VelocityTrackerOptions,
-} from "./velocity-tracker.js";
+import { VelocityTracker, type VelocityTrackerOptions } from "./velocity-tracker.js";
 
 const DEFAULT_POKE_RADIUS = 0.05;
 /** Interactor id used when gaze is synthesized from the head pose. */
@@ -116,9 +112,9 @@ export class InteractionRuntime {
   private readonly sourceStates = new Map<string, SourceRuntimeState>();
   private readonly events = new Emitter<InteractionEvent>();
   private readonly feedbackEmitter = new Emitter<FeedbackIntent>();
-  private readonly afterSample = new Emitter<readonly InputSourceSnapshotWithVelocity[]>();
+  private readonly afterSample = new Emitter<readonly InputSourceSnapshot[]>();
   private readonly velocityTracker: VelocityTracker | null;
-  private lastSources = new Map<string, InputSourceSnapshotWithVelocity>();
+  private lastSources = new Map<string, InputSourceSnapshot>();
   private capabilities: InputCapabilities;
   private readonly unsubscribeCaps: Unsubscribe;
   private disposed = false;
@@ -231,16 +227,21 @@ export class InteractionRuntime {
     return this.feedbackEmitter.subscribe(listener);
   }
 
-  /** Sampled sources for this frame - the UI Extensions pointer bridge hook. */
+  /**
+   * Sampled sources for this frame - the UI Extensions pointer bridge hook.
+   *
+   * @deprecated Use {@link onSample}. Both deliver the same stream: since
+   * `@realitycollective/webxr-input` 0.1.1 carries `linearVelocity` and
+   * `angularVelocity` on `InputSourceSnapshot`, the two signatures are
+   * identical and only one name is needed. This one is kept so existing
+   * callers keep working and will be removed in a later major release.
+   */
   onSourcesSampled(listener: (sources: readonly InputSourceSnapshot[]) => void): Unsubscribe {
     return this.afterSample.subscribe(listener);
   }
 
-  /**
-   * This frame's sources, velocity included. The same stream as
-   * {@link onSourcesSampled} with the velocity fields declared.
-   */
-  onSample(listener: (sources: readonly InputSourceSnapshotWithVelocity[]) => void): Unsubscribe {
+  /** This frame's sources, velocity included. */
+  onSample(listener: (sources: readonly InputSourceSnapshot[]) => void): Unsubscribe {
     return this.afterSample.subscribe(listener);
   }
 
@@ -248,7 +249,7 @@ export class InteractionRuntime {
    * The last sample of one source, velocity included. Undefined before the
    * first update, and once the source stops reporting.
    */
-  getSource(id: string): InputSourceSnapshotWithVelocity | undefined {
+  getSource(id: string): InputSourceSnapshot | undefined {
     return this.lastSources.get(id);
   }
 

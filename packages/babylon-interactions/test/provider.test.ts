@@ -306,7 +306,7 @@ describe("BabylonInputProvider haptics and presence", () => {
       new FakeController({ id: "l", handedness: "left", rootMesh: leftRoot }),
       new FakeController({ id: "r", handedness: "right", rootMesh: rightRoot }),
     );
-    expect(provider.supportsPresence).toBe(true);
+    expect(provider.getCapabilities().presence).toBe(true);
     expect(provider.setPresenceVisible("none", false)).toBe(true);
 
     expect(provider.setPresenceVisible("left", false)).toBe(true);
@@ -320,7 +320,7 @@ describe("BabylonInputProvider haptics and presence", () => {
 
   it("counts the hand mesh as a visual and reports nothing to hide otherwise", () => {
     const { xr, provider } = setup();
-    expect(provider.supportsPresence).toBe(false);
+    expect(provider.getCapabilities().presence).toBe(false);
     expect(provider.setPresenceVisible("none", false)).toBe(false);
 
     const handMesh = new FakeNode();
@@ -329,7 +329,7 @@ describe("BabylonInputProvider haptics and presence", () => {
     xr.handTracking = tracking;
     xr.start(new FakeController({ id: "left-hand", handedness: "left", hand: true }));
 
-    expect(provider.supportsPresence).toBe(true);
+    expect(provider.getCapabilities().presence).toBe(true);
     expect(provider.setPresenceVisible("right", false)).toBe(false);
     expect(provider.setPresenceVisible("left", false)).toBe(true);
     expect(handMesh.enabledWrites).toEqual([false]);

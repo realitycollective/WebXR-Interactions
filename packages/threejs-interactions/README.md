@@ -16,6 +16,17 @@ It re-exports everything from [`@realitycollective/webxr-interactions`](https://
 | **Hit-testing** | three.js raycasting against your scene graph |
 | **Movement** | Moves and rotates three.js objects for grab, hinge, dial and slide |
 | **Desktop** | A mouse fallback, so the same scene is testable without a headset |
+| **Presence** | Show and hide the user's own hand and controller models, once you have registered them |
+
+## Presence
+
+`registerVisual(handedness, root)` is on this adapter and on no other, because a standalone three.js app builds its own hand and controller models. The IWSDK and Babylon adapters find models the engine already built; here there is nothing to show or hide until you hand one over. So `capabilities.presence` is false until the first `registerVisual` call and true afterwards, and it changes back if you give the last one back with `unregisterVisual`. Registering notifies `onCapabilitiesChanged` like any other capability change.
+
+```ts
+provider.registerVisual("left", leftHandModel);
+provider.registerVisual("right", rightHandModel);
+provider.setPresenceVisible("left", false); // hide the left hand
+```
 
 ## Usage
 

@@ -241,8 +241,8 @@ describe("pulse", () => {
 });
 
 describe("presence", () => {
-  it("declares support", () => {
-    expect(providerFor(makeWorld()).supportsPresence).toBe(true);
+  it("declares support through the capability", () => {
+    expect(providerFor(makeWorld()).getCapabilities().presence).toBe(true);
   });
 
   it("reports failure when IWSDK has published no visual adapters", () => {
@@ -345,6 +345,72 @@ describe("presence", () => {
     providerFor(world).sample();
     expect(parts.hand.left.child.visible).toBe(true);
     expect(parts.controller.left.child.visible).toBe(true);
+  });
+
+  it("writes nothing when a repeat call asks for what is already applied", () => {
+    const { adapters, parts } = fakeVisualAdapters();
+    const { world } = immersiveWorld();
+    world.input.xr.visualAdapters = adapters;
+    const provider = providerFor(world);
+
+    expect(provider.setPresenceVisible("all", false)).toBe(true);
+    expect(parts.controller.left.child.visible).toBe(false);
+
+    // Stand in for the walk having happened: if the repeat re-applies, this
+    // goes back to false. An app pushing presence from a state subscription
+    // makes this call on every unrelated state change.
+    parts.controller.left.child.visible = true;
+    parts.controller.right.child.visible = true;
+    expect(provider.setPresenceVisible("all", false)).toBe(true);
+    expect(parts.controller.left.child.visible).toBe(true);
+    expect(parts.controller.right.child.visible).toBe(true);
+
+    // The same for a repeated modality.
+    provider.setPresenceModality("controllers");
+    parts.controller.left.child.visible = true;
+    provider.setPresenceModality("controllers");
+    expect(parts.controller.left.child.visible).toBe(true);
+  });
+
+  it("still writes when only one side of a repeat actually changed", () => {
+    const { adapters, parts } = fakeVisualAdapters();
+    const { world } = immersiveWorld();
+    world.input.xr.visualAdapters = adapters;
+    const provider = providerFor(world);
+
+    provider.setPresenceVisible("all", false);
+    parts.controller.left.child.visible = true;
+    parts.controller.right.child.visible = true;
+
+    provider.setPresenceVisible("right", true);
+    expect(parts.controller.right.child.visible).toBe(true);
+    // Left was already hidden and is left alone by the diff.
+    expect(parts.controller.left.child.visible).toBe(true);
+  });
+
+  it("re-applies unconditionally on every sample, so a capability refresh lands", () => {
+    const { adapters, parts } = fakeVisualAdapters();
+    const { world } = immersiveWorld();
+    world.input.xr.visualAdapters = adapters;
+    const provider = providerFor(world);
+
+    provider.setPresenceVisible("all", true);
+    provider.setPresenceModality("auto");
+    expect(parts.controller.left.child.visible).toBe(true);
+    expect(parts.hand.left.child.visible).toBe(false);
+
+    // IWSDK re-asserts its own visuals every frame; the desired state has to
+    // be pushed again even though nothing the caller asked for changed.
+    parts.controller.left.child.visible = false;
+    provider.sample();
+    expect(parts.controller.left.child.visible).toBe(true);
+
+    // A capability refresh swaps the modality underneath the adapter.
+    world.session = new FakeSession({ enabledFeatures: ["hand-tracking"] });
+    world.visibilityState.set(VisibilityState.Visible);
+    provider.sample();
+    expect(parts.hand.left.child.visible).toBe(true);
+    expect(parts.controller.left.child.visible).toBe(false);
   });
 
   it("tolerates an adapter with no visual yet", () => {

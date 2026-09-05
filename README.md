@@ -17,7 +17,7 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 | --- | --- |
 | [`@realitycollective/webxr-input`](https://github.com/realitycollective/WebXR-Input) | Shared TypeScript types describing input devices. Published from its own repository. Everything below depends on it. |
 | `@realitycollective/webxr-interactions` | The core. All the interaction logic, with no 3D engine code. |
-| `@realitycollective/threejs-interactions` | Adapter for plain three.js and raw WebXR. No other framework needed. |
+| `@realitycollective/threejs-interactions` | Adapter for plain three.js and raw WebXR. No other framework needed. `registerVisual` is here and on no other adapter, because a standalone three.js app builds its own hand and controller models: presence has nothing to show or hide until you hand one over. |
 | `@realitycollective/babylon-interactions` | Adapter for Babylon.js. Not yet run against a real Babylon app. |
 | `@realitycollective/iwsdk-interactions` | Adapter for Meta's Immersive Web SDK. |
 | `@realitycollective/xrblocks-interactions` | Adapter for Google's XR Blocks. Experimental, and the API may change. |
@@ -83,7 +83,7 @@ Two workflows ship in every Reality Collective TypeScript repository, with the s
 
 ## Repository layout
 
-The repository root **is** the npm workspace root - `packages/*` are the publishable libraries, `demos/*` the clients. This matches [WebXR-Input](https://github.com/realitycollective/WebXR-Input), [WebXR-UIExtensions](https://github.com/realitycollective/WebXR-UIExtensions) and the [service-framework](https://github.com/realitycollective/com.realitycollective.service-framework.ts).
+The repository root **is** the npm workspace root - `packages/*` are the publishable libraries, `demos/*` the clients. This matches [WebXR-Input](https://github.com/realitycollective/WebXR-Input), [WebXR-UIExtensions](https://github.com/realitycollective/WebXR-UIExtensions), [WebXR-Environment](https://github.com/realitycollective/WebXR-Environment) and the [service-framework](https://github.com/realitycollective/com.realitycollective.service-framework.ts).
 
 ## Releasing
 

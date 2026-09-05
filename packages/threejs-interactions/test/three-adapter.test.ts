@@ -12,7 +12,7 @@ import {
   ThreeHitTester,
   ThreeTransformPort,
   WebXRInputProvider,
-  type InputSourceSnapshotWithVelocity,
+  type InputSourceSnapshot,
 } from "@realitycollective/threejs-interactions";
 
 describe("ThreeHitTester", () => {
@@ -124,7 +124,7 @@ describe("WebXRInputProvider presence", () => {
 
   it("reports no presence until a visual is registered", () => {
     const p = provider();
-    expect(p.supportsPresence).toBe(false);
+    expect(p.getCapabilities().presence).toBe(false);
     expect(p.setPresenceVisible("all", false)).toBe(false);
   });
 
@@ -134,7 +134,7 @@ describe("WebXRInputProvider presence", () => {
     const right = new Object3D();
     p.registerVisual("left", left);
     p.registerVisual("right", right);
-    expect(p.supportsPresence).toBe(true);
+    expect(p.getCapabilities().presence).toBe(true);
 
     expect(p.setPresenceVisible("left", false)).toBe(true);
     expect(left.visible).toBe(false);
@@ -165,6 +165,41 @@ describe("WebXRInputProvider presence", () => {
     p.setPresenceVisible("left", false);
     expect(first.visible).toBe(true);
     expect(second.visible).toBe(false);
+  });
+
+  it("announces presence as a capability change when the first visual arrives", () => {
+    const p = provider();
+    const seen: boolean[] = [];
+    p.onCapabilitiesChanged((capabilities) => seen.push(capabilities.presence));
+
+    p.registerVisual("left", new Object3D());
+    expect(seen).toEqual([true]);
+    // A second side is already covered by the first - no capability moved.
+    p.registerVisual("right", new Object3D());
+    expect(seen).toEqual([true]);
+  });
+
+  it("gives a visual back, and turns presence off with the last one", () => {
+    const p = provider();
+    const seen: boolean[] = [];
+    p.registerVisual("left", new Object3D());
+    p.registerVisual("right", new Object3D());
+    p.onCapabilitiesChanged((capabilities) => seen.push(capabilities.presence));
+
+    expect(p.unregisterVisual("left")).toBe(true);
+    expect(p.getCapabilities().presence).toBe(true);
+    expect(seen).toEqual([]);
+
+    expect(p.unregisterVisual("right")).toBe(true);
+    expect(p.getCapabilities().presence).toBe(false);
+    expect(seen).toEqual([false]);
+    expect(p.setPresenceVisible("all", false)).toBe(false);
+  });
+
+  it("reports nothing given back for a side that had no visual", () => {
+    const p = provider();
+    expect(p.unregisterVisual("left")).toBe(false);
+    expect(p.getCapabilities().presence).toBe(false);
   });
 
   it("cannot switch modality - it owns neither model family", () => {
@@ -200,7 +235,7 @@ describe("WebXRInputProvider native velocity", () => {
   function sample(
     source: Record<string, unknown>,
     poses: Map<object, unknown>,
-  ): InputSourceSnapshotWithVelocity {
+  ): InputSourceSnapshot {
     const session = {
       inputSources: [source],
       addEventListener: () => undefined,
@@ -220,11 +255,11 @@ describe("WebXRInputProvider native velocity", () => {
     } as never);
     const [snapshot] = provider.sample();
     expect(snapshot).toBeDefined();
-    return snapshot as InputSourceSnapshotWithVelocity;
+    return snapshot as InputSourceSnapshot;
   }
 
   /** A controller whose grip pose optionally carries velocity. */
-  function controllerSample(velocity: Velocities = {}): InputSourceSnapshotWithVelocity {
+  function controllerSample(velocity: Velocities = {}): InputSourceSnapshot {
     const targetRaySpace = {};
     const gripSpace = {};
     const poses = new Map<object, unknown>([
@@ -235,7 +270,7 @@ describe("WebXRInputProvider native velocity", () => {
   }
 
   /** A hand with no gripSpace, so the wrist joint supplies the carry pose. */
-  function wristSample(velocity: Velocities = {}): InputSourceSnapshotWithVelocity {
+  function wristSample(velocity: Velocities = {}): InputSourceSnapshot {
     const targetRaySpace = {};
     const wrist = {};
     const poses = new Map<object, unknown>([

@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PerspectiveCamera } from "three";
 import {
   WebXRInputProvider,
-  type InputSourceSnapshotWithVelocity,
+  type InputSourceSnapshot,
 } from "@realitycollective/threejs-interactions";
 
 type Handler = (event: unknown) => void;
@@ -180,7 +180,7 @@ describe("desktop velocity", () => {
     // A mouse reports no velocity of its own. The grip sits on the camera ray,
     // so whatever the tracker measures is camera motion, not hand motion.
     const { provider } = desktopProvider();
-    const source = provider.sample()[0] as InputSourceSnapshotWithVelocity;
+    const source = provider.sample()[0] as InputSourceSnapshot;
     expect(source.linearVelocity).toBeUndefined();
     expect(source.angularVelocity).toBeUndefined();
   });

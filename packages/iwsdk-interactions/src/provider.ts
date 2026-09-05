@@ -16,11 +16,13 @@
 import { InputComponent, VisibilityState, type World } from "@iwsdk/core";
 import {
   NO_CAPABILITIES,
+  type Handedness,
   type HeadPose,
   type InputCapabilities,
   type InputHitHint,
   type InputProvider,
   type InputSourceSnapshot,
+  type PresenceModality,
   type Unsubscribe,
 } from "@realitycollective/webxr-input";
 
@@ -34,15 +36,6 @@ export interface IWSDKProviderOptions {
 
 type Side = "left" | "right";
 const SIDES: readonly Side[] = ["left", "right"];
-
-/** Which side's visuals a presence call targets. `"all"` is both. */
-export type PresenceTarget = "left" | "right" | "none" | "all";
-
-/**
- * Which family of visuals presence shows. `"auto"` follows the engine:
- * hand visuals while hand tracking is live, controller visuals otherwise.
- */
-export type PresenceModality = "hands" | "controllers" | "auto";
 
 /**
  * Structural slice of `world.input.xr.visualAdapters`. Only two fields are
@@ -86,14 +79,18 @@ function setDescendantsVisible(adapter: PresenceAdapterLike | undefined, visible
   }
 }
 
-export class IWSDKInputProvider implements InputProvider {
-  /**
-   * This provider can show and hide the controller/hand visuals.
-   * Becomes `capabilities.presence` at
-   * `@realitycollective/webxr-input` 0.1.1.
-   */
-  readonly supportsPresence = true;
+/**
+ * The state one side's visuals were last actually written with. Presence is
+ * a function of these three, so a repeat call with all three unchanged has
+ * nothing to write.
+ */
+interface AppliedPresence {
+  visible: boolean;
+  modality: PresenceModality;
+  handJoints: boolean;
+}
 
+export class IWSDKInputProvider implements InputProvider {
   private readonly world: World;
   private readonly nativeGrab: boolean;
   private capabilities: InputCapabilities;
@@ -104,6 +101,11 @@ export class IWSDKInputProvider implements InputProvider {
   /** Snapshot id -> side, filled by `sample()` so `pulse` need not parse ids. */
   private readonly sideBySourceId = new Map<string, Side>();
   private readonly presenceVisible: Record<Side, boolean> = { left: true, right: true };
+  /** What was last written per side, so an unchanged call writes nothing. */
+  private readonly presenceApplied: Record<Side, AppliedPresence | null> = {
+    left: null,
+    right: null,
+  };
   private presenceModality: PresenceModality = "auto";
   /** Presence is only re-applied once a client has actually asked for it. */
   private presenceRequested = false;
@@ -169,6 +171,9 @@ export class IWSDKInputProvider implements InputProvider {
       gaze: true,
       headPose: true,
       haptics,
+      // IWSDK builds and owns both visual families, so presence is always
+      // available - `applyPresence` only needs the adapters to have appeared.
+      presence: true,
     };
     if (JSON.stringify(next) !== JSON.stringify(this.capabilities)) {
       this.capabilities = next;
@@ -208,7 +213,10 @@ export class IWSDKInputProvider implements InputProvider {
     this.sideBySourceId.clear();
     // Adapters are created as input sources connect, which can be after the
     // client set its presence, so the desired state is re-applied here.
-    if (this.presenceRequested) this.applyPresence();
+    // Unconditionally: `@iwsdk/xr-input` re-asserts the visuals from its own
+    // per-frame update, and a capability refresh can change the modality
+    // underneath us, so the desired state has to be pushed again.
+    if (this.presenceRequested) this.applyPresence(true);
     if (!this.world.session) return [];
     if (this.world.visibilityState.peek() !== VisibilityState.Visible) return [];
 
@@ -276,8 +284,12 @@ export class IWSDKInputProvider implements InputProvider {
    *
    * `"none"` targets no side - the handedness value that has no visual
    * here - so the call reports availability without changing anything.
+   *
+   * A call that asks for what is already applied writes nothing, so an app
+   * that pushes presence from a state subscription costs nothing on the
+   * state changes that did not touch presence.
    */
-  setPresenceVisible(target: PresenceTarget, visible: boolean): boolean {
+  setPresenceVisible(target: Handedness | "all", visible: boolean): boolean {
     this.presenceRequested = true;
     for (const side of SIDES) {
       if (target === "all" || target === side) this.presenceVisible[side] = visible;
@@ -288,7 +300,8 @@ export class IWSDKInputProvider implements InputProvider {
   /**
    * Choose which family of visuals is shown. `"hands"` and `"controllers"`
    * force one family and hide the other; `"auto"` follows the engine's own
-   * modality (hand visuals while hand tracking is live).
+   * modality (hand visuals while hand tracking is live). A repeat of the
+   * current modality writes nothing.
    */
   setPresenceModality(mode: PresenceModality): boolean {
     this.presenceRequested = true;
@@ -303,19 +316,40 @@ export class IWSDKInputProvider implements InputProvider {
     return xr?.visualAdapters ?? null;
   }
 
-  private applyPresence(): boolean {
+  /**
+   * Write the desired presence into IWSDK's visuals.
+   *
+   * Each side is skipped when the three inputs presence depends on - the
+   * side's visibility, the modality and the hand-tracking capability - are
+   * all unchanged since the last write. Walking every descendant of both
+   * visual families is not free, and an app pushing presence from a state
+   * subscription calls this on every unrelated state change.
+   *
+   * `force` skips the diff, for the per-frame re-apply that has to win
+   * against IWSDK's own writes.
+   */
+  private applyPresence(force = false): boolean {
     const adapters = this.visualAdapters();
     if (!adapters) return false;
-    const hands =
-      this.presenceModality === "hands" ||
-      (this.presenceModality === "auto" && this.capabilities.handJoints);
-    const controllers =
-      this.presenceModality === "controllers" ||
-      (this.presenceModality === "auto" && !this.capabilities.handJoints);
+    const handJoints = this.capabilities.handJoints;
+    const modality = this.presenceModality;
+    const hands = modality === "hands" || (modality === "auto" && handJoints);
+    const controllers = modality === "controllers" || (modality === "auto" && !handJoints);
     for (const side of SIDES) {
       const wanted = this.presenceVisible[side];
+      const last = this.presenceApplied[side];
+      if (
+        !force &&
+        last !== null &&
+        last.visible === wanted &&
+        last.modality === modality &&
+        last.handJoints === handJoints
+      ) {
+        continue;
+      }
       setDescendantsVisible(adapters.hand?.[side], wanted && hands);
       setDescendantsVisible(adapters.controller?.[side], wanted && controllers);
+      this.presenceApplied[side] = { visible: wanted, modality, handJoints };
     }
     return true;
   }
