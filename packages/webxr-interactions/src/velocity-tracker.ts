@@ -12,6 +12,11 @@
  * time (or seen again after dropping out of tracking) gets no velocity
  * that frame, so a reconnecting controller cannot report a metres-per-
  * second jump from wherever it was last seen.
+ *
+ * It keeps last frame's `position` and `quaternion` arrays by reference
+ * rather than copying them. The ownership rule on `InputSourceSnapshot`
+ * permits that: a provider never writes to a snapshot it has already
+ * handed over, so last frame's tuples still hold last frame's numbers.
  */
 import {
   velocityBetween,

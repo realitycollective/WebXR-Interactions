@@ -28,7 +28,6 @@ import {
 import type { InputHitHint, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
   InteractionRuntime,
-  rayPointDistance,
   type DwellConfig,
   type HitTester,
   type InteractableDescriptor,
@@ -39,28 +38,63 @@ import { IWSDKTransformPort } from "./transform-port.js";
 
 const TEMP_V = new Vector3();
 
-/** Approximate hit-tester over registered entities (gaze/dwell targeting). */
+interface HitEntry {
+  id: string;
+  entity: Entity;
+  radius: number;
+  /** World position of the entity, valid for `frame`. */
+  x: number;
+  y: number;
+  z: number;
+  frame: number;
+}
+
+/**
+ * Approximate hit-tester over registered entities (gaze/dwell targeting).
+ *
+ * The core asks it five questions a frame - a poke and a ray test per side,
+ * plus the gaze ray - and each one used to resolve every entity's world
+ * position again through `getWorldPosition`, which walks the parent chain.
+ * With 200 entities that was a thousand matrix updates a frame. The bridge
+ * calls `beginFrame` before the runtime ticks, so each entity is resolved
+ * once and the five answers come from that. Without a `beginFrame` the
+ * tester still answers correctly, resolving on every query as it did before.
+ */
 class EntityHitTester implements HitTester {
-  private readonly entries = new Map<string, { entity: Entity; radius: number }>();
+  private readonly entries = new Map<string, HitEntry>();
+  /** The current frame stamp; 0 until `beginFrame` is first called. */
+  private frame = 0;
 
   register(id: string, entity: Entity, radius: number): void {
-    this.entries.set(id, { entity, radius });
+    this.entries.set(id, { id, entity, radius, x: 0, y: 0, z: 0, frame: -1 });
   }
 
   unregister(id: string): void {
     this.entries.delete(id);
   }
 
+  /** Start a frame: positions resolved from here on are reused until the next call. */
+  beginFrame(): void {
+    this.frame += 1;
+  }
+
   hitRay(ray: RayTuple): InteractableHit | null {
     let best: InteractableHit | null = null;
-    for (const [id, { entity, radius }] of this.entries) {
-      const object = entity.object3D;
-      if (!object || !object.visible) continue;
-      object.getWorldPosition(TEMP_V);
-      const point: Vec3Tuple = [TEMP_V.x, TEMP_V.y, TEMP_V.z];
-      const { distance, t } = rayPointDistance(ray, point);
-      if (t > 0 && distance <= radius && (best === null || t < best.distance)) {
-        best = { interactableId: id, distance: t, point };
+    const [ox, oy, oz] = ray.origin;
+    const [dx, dy, dz] = ray.direction;
+    for (const entry of this.entries.values()) {
+      if (!this.resolve(entry)) continue;
+      // The ray-to-point distance `rayPointDistance` computes, inlined so a
+      // query allocates nothing per entity.
+      const t = (entry.x - ox) * dx + (entry.y - oy) * dy + (entry.z - oz) * dz;
+      if (t <= 0) continue;
+      const distance = Math.hypot(
+        ox + dx * t - entry.x,
+        oy + dy * t - entry.y,
+        oz + dz * t - entry.z,
+      );
+      if (distance <= entry.radius && (best === null || t < best.distance)) {
+        best = { interactableId: entry.id, distance: t, point: [entry.x, entry.y, entry.z] };
       }
     }
     return best;
@@ -68,21 +102,36 @@ class EntityHitTester implements HitTester {
 
   hitProximity(point: Vec3Tuple, radius: number): InteractableHit | null {
     let best: InteractableHit | null = null;
-    for (const [id, { entity, radius: targetRadius }] of this.entries) {
-      const object = entity.object3D;
-      if (!object || !object.visible) continue;
-      object.getWorldPosition(TEMP_V);
+    for (const entry of this.entries.values()) {
+      if (!this.resolve(entry)) continue;
       const distance =
-        Math.hypot(TEMP_V.x - point[0], TEMP_V.y - point[1], TEMP_V.z - point[2]) - targetRadius;
+        Math.hypot(entry.x - point[0], entry.y - point[1], entry.z - point[2]) - entry.radius;
       if (distance <= radius && (best === null || distance < best.distance)) {
         best = {
-          interactableId: id,
+          interactableId: entry.id,
           distance: Math.max(0, distance),
-          point: [TEMP_V.x, TEMP_V.y, TEMP_V.z],
+          point: [entry.x, entry.y, entry.z],
         };
       }
     }
     return best;
+  }
+
+  /**
+   * Bring the entry's cached world position up to this frame. False when
+   * the entity has no object or a hidden one, which no query targets.
+   */
+  private resolve(entry: HitEntry): boolean {
+    const object = entry.entity.object3D;
+    if (!object || !object.visible) return false;
+    if (this.frame === 0 || entry.frame !== this.frame) {
+      object.getWorldPosition(TEMP_V);
+      entry.x = TEMP_V.x;
+      entry.y = TEMP_V.y;
+      entry.z = TEMP_V.z;
+      entry.frame = this.frame;
+    }
+    return true;
   }
 }
 
@@ -174,6 +223,9 @@ export class IWSDKInteractions {
     this.provider.setNativeGrabbing("left", leftGrabbing);
     this.provider.setNativeGrabbing("right", rightGrabbing);
     this.provider.setHints(hints);
+    // One world-position resolution per entity for the five queries the
+    // runtime is about to make.
+    this.hitTester.beginFrame();
     this.runtime.update(delta);
   }
 

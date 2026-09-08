@@ -9,6 +9,11 @@
  * `@realitycollective/webxr-uiextensions`): press-move-release derived
  * from a source's ray + select signal, fed by the runtime's per-frame
  * sampling.
+ *
+ * Samples hand over the snapshot's own ray tuples. A provider never writes
+ * to a snapshot it has already delivered (the ownership rule on
+ * `InputSourceSnapshot`), so a consumer may keep a sample - a drag holds
+ * its press-time origin - without copying it.
  */
 import {
   SELECT_PRESS_THRESHOLD,

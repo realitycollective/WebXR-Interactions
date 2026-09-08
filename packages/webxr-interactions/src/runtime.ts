@@ -240,7 +240,14 @@ export class InteractionRuntime {
     return this.afterSample.subscribe(listener);
   }
 
-  /** This frame's sources, velocity included. */
+  /**
+   * This frame's sources, velocity included.
+   *
+   * The snapshots are the provider's own objects for this frame and are
+   * never written to again once delivered (the ownership rule on
+   * `InputSourceSnapshot`), so a listener may keep one, or a tuple inside
+   * it, across frames without copying.
+   */
   onSample(listener: (sources: readonly InputSourceSnapshot[]) => void): Unsubscribe {
     return this.afterSample.subscribe(listener);
   }
@@ -248,6 +255,10 @@ export class InteractionRuntime {
   /**
    * The last sample of one source, velocity included. Undefined before the
    * first update, and once the source stops reporting.
+   *
+   * The snapshot is the caller's to keep: it is never mutated after the
+   * frame it was sampled in, and it is not refreshed in place, so call
+   * again for a newer one.
    */
   getSource(id: string): InputSourceSnapshot | undefined {
     return this.lastSources.get(id);
