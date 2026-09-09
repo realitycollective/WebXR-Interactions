@@ -16,7 +16,6 @@
  * (dwell) and anything IWSDK's pipeline does not cover.
  */
 import {
-  createSystem,
   Grabbed,
   PokeInteractable,
   Pressed,
@@ -24,6 +23,7 @@ import {
   type Entity,
   type World,
 } from "@iwsdk/core";
+import { createSystem } from "./create-system.js";
 import { Vector3 } from "three";
 import type { InputHitHint, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {

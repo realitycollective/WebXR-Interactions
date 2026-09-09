@@ -11,6 +11,7 @@
     "webxr-interactions",
     "babylon-interactions"
   ],
+  "declarationCheck": true,
   "legacyPeerDeps": true,
   "preid": "preview",
   "prebundle": {
