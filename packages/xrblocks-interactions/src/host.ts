@@ -17,8 +17,8 @@
  * ```
  */
 import type { Object3D } from "three";
+import { InteractionRuntime } from "@realitycollective/webxr-interactions";
 import {
-  InteractionRuntime,
   ThreeHitTester,
   ThreeTransformPort,
   type DwellConfig,

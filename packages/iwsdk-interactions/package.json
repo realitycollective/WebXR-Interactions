@@ -36,12 +36,15 @@
     "@realitycollective/webxr-interactions": "^0.1.0-preview.4"
   },
   "peerDependencies": {
-    "@iwsdk/core": ">=0.5.0 <0.6.0"
+    "@iwsdk/core": ">=0.5.0 <0.6.0",
+    "@iwsdk/xr-input": ">=0.5.0 <0.6.0",
+    "three": ">=0.170.0"
   },
   "devDependencies": {
     "@iwsdk/core": "0.5.3",
+    "@iwsdk/xr-input": "0.5.3",
     "three": "npm:super-three@0.181.0",
-    "@types/three": "*"
+    "@types/three": "0.181.0"
   },
   "repository": {
     "type": "git",

@@ -13,7 +13,8 @@
  * pre-resolved hints (`setHints`) and flags native grabbing, which the
  * core consumes IN PLACE of its own hit-testing.
  */
-import { InputComponent, VisibilityState, type World } from "@iwsdk/core";
+import { VisibilityState, type World } from "@iwsdk/core";
+import { InputComponent } from "@iwsdk/xr-input";
 import {
   NO_CAPABILITIES,
   type Handedness,
@@ -391,5 +392,5 @@ export class IWSDKInputProvider implements InputProvider {
 }
 
 // Shared scratch objects (single-threaded frame sampling).
-import { Quaternion, Vector3 } from "@iwsdk/core";
+import { Quaternion, Vector3 } from "three";
 const TEMP = { v1: new Vector3(), v2: new Vector3(), q1: new Quaternion() };

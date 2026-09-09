@@ -2,8 +2,11 @@
  * IWSDKTransformPort - the core's TransformPort over an IWSDK entity's
  * `object3D`, honouring FROM-REST semantics (rest captured at
  * construction; `getWorldPose()` reports the rest pose in world space).
- * Same math as the three.js adapter's port, expressed against IWSDK's
- * re-exported three types so there is exactly one three instance.
+ * Same math as the three.js adapter's port. The three.js classes come from
+ * `three` itself, a declared peer, rather than through `@iwsdk/core`'s
+ * `export * from 'three'`: a consumer that excludes `three` from Vite's
+ * dependency optimizer cannot resolve names that only exist behind that star.
+ * One three instance is what the peer dependency gives every flat install.
  */
 import {
   Matrix4,
@@ -13,7 +16,7 @@ import {
   type Mesh,
   type MeshStandardMaterial,
   type Object3D,
-} from "@iwsdk/core";
+} from "three";
 import type { PoseTuple, QuatTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import type { TransformPort } from "@realitycollective/webxr-interactions";
 

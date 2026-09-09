@@ -21,10 +21,10 @@ import {
   PokeInteractable,
   Pressed,
   RayInteractable,
-  Vector3,
   type Entity,
   type World,
 } from "@iwsdk/core";
+import { Vector3 } from "three";
 import type { InputHitHint, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
   InteractionRuntime,

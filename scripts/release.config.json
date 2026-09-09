@@ -12,5 +12,26 @@
     "babylon-interactions"
   ],
   "legacyPeerDeps": true,
-  "preid": "preview"
+  "preid": "preview",
+  "prebundle": {
+    "bundlers": [
+      {
+        "id": "vite7",
+        "package": "vite-7",
+        "detectsStarHops": true
+      },
+      {
+        "id": "vite8",
+        "package": "vite-8",
+        "detectsStarHops": false
+      }
+    ],
+    "packages": {
+      "iwsdk-interactions": {
+        "hosts": [
+          "@iwsdk/core"
+        ]
+      }
+    }
+  }
 }
