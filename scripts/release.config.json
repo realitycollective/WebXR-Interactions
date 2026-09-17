@@ -1,0 +1,38 @@
+{
+  "core": "webxr-interactions",
+  "packages": [
+    "webxr-interactions",
+    "threejs-interactions",
+    "babylon-interactions",
+    "iwsdk-interactions",
+    "xrblocks-interactions"
+  ],
+  "importCheck": [
+    "webxr-interactions",
+    "babylon-interactions"
+  ],
+  "declarationCheck": true,
+  "legacyPeerDeps": true,
+  "preid": "preview",
+  "prebundle": {
+    "bundlers": [
+      {
+        "id": "vite7",
+        "package": "vite-7",
+        "detectsStarHops": true
+      },
+      {
+        "id": "vite8",
+        "package": "vite-8",
+        "detectsStarHops": false
+      }
+    ],
+    "packages": {
+      "iwsdk-interactions": {
+        "hosts": [
+          "@iwsdk/core"
+        ]
+      }
+    }
+  }
+}
