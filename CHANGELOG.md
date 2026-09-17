@@ -4,6 +4,17 @@ Change log for the Reality Collective WebXR Interaction Extensions packages. All
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Preview builds are not listed separately. The entry for a version accumulates while its previews are published, and is dated when that version is released.
 
+## [0.1.1]
+
+### Changed
+
+- `@realitycollective/xrblocks-interactions` - the structural slices `XBVec3Like`, `XBQuatLike`, `XBRayLike` and `XBControllerLike` are exported, under the same `XB` prefix as `XBRaySourceLike`, `XBDirectTouchLike` and `XBFrameLike` whose fields they type. They were module-private, so a consumer building a fake frame for a test had nothing to name, and TypeDoc reported each as referenced but undocumented.
+
+### Fixed
+
+- `@realitycollective/webxr-interactions` - `InteractableDescriptor.pokeRadius` had no effect. The value was stored on the registration and documented as the poke trigger radius, but the proximity query always used the 5 cm default, so an interactable asking for a wider or narrower poke got the default. The runtime now queries once per source at the largest radius any enabled interactable registered, and accepts the nearest hit only when it lies inside that interactable's own radius. One query per source is kept deliberately; the trade is that a farther interactable with a larger radius is not found behind a nearer one with a smaller radius, because the hit tester returns only the nearest. Covered by a runtime test that failed before the change.
+- CI - the staging deploy published under `--branch=pr-<number>` while the `-test` Pages project's production branch is `staging`, so only `pr-<n>.webxr-interactions-test.pages.dev` aliases were ever created and the project's root URL was a 404. It now deploys as `staging` on every pull request and on every push to `development`, so `webxr-interactions-test.pages.dev` serves the newest preview build, the same arrangement WebXR-UIExtensions already had.
+
 ## [0.1.0] - 2026-09-17
 
 ### Added
@@ -57,4 +68,5 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - All five packages depend on `@realitycollective/webxr-input`, released independently from the [WebXR-Input](https://github.com/realitycollective/WebXR-Input) repository. That package must be published before this one.
 - The interaction packages themselves carry no IWSDK coupling beyond the adapter: `webxr-interactions` is engine-free, and `threejs-interactions` and `xrblocks-interactions` peer only on three.js.
 
+[0.1.1]: https://github.com/realitycollective/WebXR-Interactions/compare/v0.1.0...development
 [0.1.0]: https://github.com/realitycollective/WebXR-Interactions/releases/tag/v0.1.0

@@ -31,22 +31,32 @@ import {
   type Unsubscribe,
 } from "@realitycollective/webxr-input";
 
-/** Structural slice of THREE.Vector3 / Quaternion. */
-interface Vec3Like {
+// The four structural slices below are exported, following the XB*Like
+// types, because they are the field types of XBRaySourceLike and
+// XBDirectTouchLike: a consumer building a fake frame for a test, or typing an
+// adapter of its own, has a name for each shape rather than an anonymous
+// object type in the declarations.
+
+/** Structural slice of THREE.Vector3. */
+export interface XBVec3Like {
   x: number;
   y: number;
   z: number;
 }
-interface QuatLike extends Vec3Like {
+
+/** Structural slice of THREE.Quaternion. */
+export interface XBQuatLike extends XBVec3Like {
   w: number;
 }
 
-interface RayLike {
-  origin: Vec3Like;
-  direction: Vec3Like;
+/** Structural slice of THREE.Ray. */
+export interface XBRayLike {
+  origin: XBVec3Like;
+  direction: XBVec3Like;
 }
 
-interface ControllerLike {
+/** The slice of an xrblocks controller the provider reads. */
+export interface XBControllerLike {
   inputSource?: { handedness?: string };
   gamepad?: { buttons?: ReadonlyArray<{ value: number }> };
   userData?: { squeezing?: boolean; selected?: boolean; id?: number };
@@ -54,17 +64,17 @@ interface ControllerLike {
 
 /** Structural `RaySourceInput` (xrblocks src/interaction/InteractionTypes.ts). */
 export interface XBRaySourceLike {
-  controller: ControllerLike;
+  controller: XBControllerLike;
   sourceType: string; // 'mouse' | 'controller-ray' | 'hand-ray' | 'gaze' | 'simulator'
-  ray: RayLike;
+  ray: XBRayLike;
   selected: boolean;
 }
 
 /** Structural `DirectTouchInput`. */
 export interface XBDirectTouchLike {
-  controller: ControllerLike;
+  controller: XBControllerLike;
   handIndex: number; // 0 = LEFT, 1 = RIGHT (xrblocks Handedness enum)
-  point: Vec3Like;
+  point: XBVec3Like;
   selected: boolean;
 }
 
@@ -79,8 +89,8 @@ export interface XRBlocksContext {
   input: { getFrame(): XBFrameLike };
   /** `xb.camera` / `xb.core.camera` - the head pose. */
   camera: {
-    getWorldPosition(target: Vec3Like): Vec3Like;
-    getWorldQuaternion(target: QuatLike): QuatLike;
+    getWorldPosition(target: XBVec3Like): XBVec3Like;
+    getWorldQuaternion(target: XBQuatLike): XBQuatLike;
   };
 }
 
@@ -214,7 +224,7 @@ function normalizeHandedness(value: string | undefined): "left" | "right" | "non
   return value === "left" || value === "right" ? value : "none";
 }
 
-function copyRay(ray: RayLike): {
+function copyRay(ray: XBRayLike): {
   origin: [number, number, number];
   direction: [number, number, number];
 } {
