@@ -33,7 +33,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-input": "^0.1.1",
+    "@realitycollective/webxr-input": "^0.1.4",
     "@realitycollective/webxr-interactions": "^0.1.0"
   },
   "repository": {
