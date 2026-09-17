@@ -69,6 +69,10 @@ export class FakeProvider implements InputProvider {
 export class FakeHitTester implements HitTester {
   rayTarget: string | null = null;
   proximityTarget: string | null = null;
+  /** Distance reported for the proximity hit; 1 cm by default, well inside every radius. */
+  proximityDistance = 0.01;
+  /** The radius of the last proximity query, so a test can see what the runtime asked for. */
+  lastProximityRadius: number | null = null;
 
   hitRay(_ray: RayTuple): InteractableHit | null {
     return this.rayTarget
@@ -76,9 +80,10 @@ export class FakeHitTester implements HitTester {
       : null;
   }
 
-  hitProximity(_point: Vec3Tuple, _radius: number): InteractableHit | null {
-    return this.proximityTarget
-      ? { interactableId: this.proximityTarget, distance: 0.01, point: [0, 0, 0] }
+  hitProximity(_point: Vec3Tuple, radius: number): InteractableHit | null {
+    this.lastProximityRadius = radius;
+    return this.proximityTarget && this.proximityDistance <= radius
+      ? { interactableId: this.proximityTarget, distance: this.proximityDistance, point: [0, 0, 0] }
       : null;
   }
 }

@@ -347,8 +347,17 @@ export class InteractionRuntime {
       hints.find((h) => h.state === "hover");
     if (hint && this.targetable(hint.targetId)) return hint.targetId;
     if (source.indexTip && this.hitTester) {
-      const poke = this.hitTester.hitProximity(source.indexTip, DEFAULT_POKE_RADIUS);
-      if (poke && this.targetable(poke.interactableId)) return poke.interactableId;
+      // One proximity query at the largest radius any interactable asked for,
+      // then the nearest hit must be inside ITS OWN radius. A per-interactable
+      // query would be a hit test per registration per source per frame; this
+      // keeps it to one. The trade: a farther interactable with a bigger radius
+      // is not found behind a nearer one with a smaller radius, because the
+      // tester returns only the nearest.
+      const poke = this.hitTester.hitProximity(source.indexTip, this.maxPokeRadius());
+      if (poke && this.targetable(poke.interactableId)) {
+        const registered = this.interactables.get(poke.interactableId)!;
+        if (poke.distance <= registered.pokeRadius) return poke.interactableId;
+      }
     }
     if (source.ray && this.hitTester) {
       const hit = this.hitTester.hitRay(source.ray);
@@ -360,6 +369,15 @@ export class InteractionRuntime {
   private targetable(id: string): boolean {
     const registered = this.interactables.get(id);
     return registered !== undefined && registered.enabled;
+  }
+
+  /** The largest poke radius among enabled interactables; the default when none is registered. */
+  private maxPokeRadius(): number {
+    let radius = 0;
+    for (const registered of this.interactables.values()) {
+      if (registered.enabled && registered.pokeRadius > radius) radius = registered.pokeRadius;
+    }
+    return radius > 0 ? radius : DEFAULT_POKE_RADIUS;
   }
 
   private flags(registered: Registered): { pressable: boolean; grabbable: boolean } {
