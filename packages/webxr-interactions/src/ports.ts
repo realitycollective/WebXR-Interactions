@@ -18,6 +18,9 @@ export interface InteractableHit {
  * Implemented by the adapter (three.js Raycaster, engine BVH, …). A
  * provider that pre-resolves targeting (IWSDK) may make this redundant -
  * provider hints always take precedence over hit-tester results.
+ *
+ * Each hit, and the `point` tuple in it, is a fresh value the caller owns.
+ * A ray or point passed in is read during the call and not kept.
  */
 export interface HitTester {
   hitRay(ray: RayTuple): InteractableHit | null;
@@ -33,10 +36,23 @@ export interface HitTester {
  * registration and applies these relative to it, so behaviours compose
  * with anything else animating the same object (the pale-signal
  * non-destructive-offset rule).
+ *
+ * Every tuple a port returns is a fresh value the caller owns. The port
+ * keeps no reference to it and never writes to it again. A tuple passed in
+ * is read during the call and not kept, so the caller may reuse it.
  */
 export interface TransformPort {
-  /** Current world pose. */
+  /**
+   * The LIVE world pose: where the object is now, after every offset,
+   * rotation and world-pose write, including a write made by anything else.
+   */
   getWorldPose(): PoseTuple;
+  /**
+   * The rest pose captured at registration, in world space. Offsets and
+   * rotations are measured from it, so it stays put while the port writes.
+   * It follows a parent that moves.
+   */
+  getRestWorldPose(): PoseTuple;
   /** Local-space pose relative to the captured rest (dragged observation). */
   getLocalOffset(): Vec3Tuple;
   /** Additive local-space offset from rest (driven press / slide). */

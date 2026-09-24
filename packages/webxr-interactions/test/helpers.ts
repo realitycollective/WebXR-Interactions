@@ -95,7 +95,12 @@ export class FakeTransform implements TransformPort {
   worldPose: PoseTuple | null = null;
   effect: { scale?: number; emissive?: number } | null = null;
 
+  /** The last pose written through setWorldPose, else the rest pose. */
   getWorldPose(): PoseTuple {
+    return this.worldPose ?? this.restPose;
+  }
+
+  getRestWorldPose(): PoseTuple {
     return this.restPose;
   }
 

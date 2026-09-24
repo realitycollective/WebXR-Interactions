@@ -20,6 +20,7 @@ export * from "./math.js";
 export * from "./events.js";
 export * from "./feedback.js";
 export * from "./ports.js";
+export * from "./contract-cases.js";
 export * from "./gaze.js";
 export * from "./descriptor.js";
 export * from "./velocity-tracker.js";

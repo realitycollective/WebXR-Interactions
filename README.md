@@ -21,6 +21,7 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 | `@realitycollective/babylon-interactions` | Adapter for Babylon.js. Not yet run against a real Babylon app. |
 | `@realitycollective/iwsdk-interactions` | Adapter for Meta's Immersive Web SDK. |
 | `@realitycollective/xrblocks-interactions` | Adapter for Google's XR Blocks. Experimental, and the API may change. |
+| `@realitycollective/native-interactions` | Adapter for a native app (OpenXR, visionOS) embedding a JavaScript engine such as Hermes. Reads the `input` and `interactions` slices of `globalThis.__rcHost`. No engine dependency; assets and rendering stay in the native app. |
 
 ### What the core gives you
 
@@ -38,6 +39,7 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 - **Babylon.js** - matches the shape of the Babylon API in TypeScript without depending on `@babylonjs/core`, the same way the XR Blocks adapter does, so an upstream release cannot break the install. It reads a `WebXRDefaultExperience`: controllers, motion controller trigger and grip, and hand-tracking joints, with the scene's own pointer as a desktop fallback. Haptics go through the motion controller's pulse. Presence shows and hides the visuals Babylon built - motion controller root meshes and hand meshes - but Babylon picks which of those to show per input source, so there is no hands-or-controllers switch. Hit-testing is a sphere test over the registered nodes; hand the adapter your own `scene.pickWithRay` for mesh-accurate targeting. Written against the documented API and covered by structural fakes: it has not yet been exercised against a real Babylon runtime.
 - **Meta IWSDK** - uses IWSDK's own player rig and controller state. IWSDK already knows what is being pressed or grabbed, so the adapter passes that answer straight through instead of working it out again. Where the app has IWSDK grabbing or physics turned on, IWSDK performs the grab. IWSDK builds the hand and controller models, so presence is full: hide or show either hand, and force hands or controllers when the automatic choice is wrong. Setup is one call: `registerInteractions(world)`.
 - **XR Blocks** - matches the shape of the XR Blocks API in TypeScript without depending on the `xrblocks` package, so an upstream release cannot break the install. XR Blocks reuses the same input objects every frame, so the adapter copies the values out immediately. XR Blocks has no haptics, so haptic requests go unfulfilled, and it exposes no way to hide its own hand and controller visuals, so there is no presence control either.
+- **Native** - reads the `input` and `interactions` slices a native app (OpenXR, visionOS) installs on `globalThis.__rcHost`, copying every value across the boundary so a host that reuses its own buffers cannot reach an object your app is still holding. Hit-testing and object movement are entirely the native app's answer, keyed by the target id you registered. No engine dependency, and optional members - haptics, presence, head pose, targeting hints - appear only when the host itself carries them.
 
 ## Demo
 
@@ -103,7 +105,7 @@ To develop against an unreleased `webxr-input`, use `npm link` rather than editi
 ## Layering rule
 
 ```
-app → ONE adapter (threejs | babylon | iwsdk | xrblocks) → core (webxr-interactions) → contracts (@realitycollective/webxr-input, separate repo)
+app → ONE adapter (threejs | babylon | iwsdk | xrblocks | native) → core (webxr-interactions) → contracts (@realitycollective/webxr-input, separate repo)
 ```
 
 Arrows only point down; the core's architecture test fails the moment an engine import lands in it. Physics deliberately stays with the client/app - adapters surface it only as the `grabs: "native"` capability.

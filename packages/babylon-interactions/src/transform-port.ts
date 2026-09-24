@@ -65,17 +65,28 @@ export class BabylonTransformPort implements TransformPort {
     this.restScale = toVec3(this.node.scaling) ?? [1, 1, 1];
   }
 
-  /**
-   * The node's LIVE world pose, from its absolute position and rotation.
-   *
-   * This differs from the three.js port, which reports the rest pose in
-   * world space. Babylon computes absolutes for its own render anyway, so
-   * reading them costs nothing and a grab starts from where the object
-   * actually is rather than from where it was registered.
-   */
+  /** The node's LIVE world pose, from its absolute position and rotation. */
   getWorldPose(): PoseTuple {
     this.node.computeWorldMatrix?.(true);
     return nodeWorldPose(this.node);
+  }
+
+  /**
+   * The captured rest pose in world space, resolved through the parent's
+   * absolute position and rotation. Parent SCALE is ignored, the same
+   * simplification as {@link setWorldPose}.
+   */
+  getRestWorldPose(): PoseTuple {
+    const parent = parentOf(this.node);
+    if (!parent) {
+      return { position: [...this.restPosition], quaternion: [...this.restQuaternion] };
+    }
+    parent.computeWorldMatrix?.(true);
+    const parentPose = nodeWorldPose(parent);
+    return {
+      position: vAdd(parentPose.position, vApplyQuat(this.restPosition, parentPose.quaternion)),
+      quaternion: quatMultiply(parentPose.quaternion, this.restQuaternion),
+    };
   }
 
   getLocalOffset(): Vec3Tuple {

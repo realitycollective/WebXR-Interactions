@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 C:/LD/01-RealityToolkit/WebXR/WebXR-Interactions
+
+ ❯ packages/webxr-interactions/test/behaviours.test.ts (13 tests | 1 failed) 14ms
+     × hinge ignores where the live pose has moved 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/webxr-interactions/test/behaviours.test.ts > hinge, dial and slide measure from the rest pose > hinge ignores where the live pose has moved
+AssertionError: expected 0.368010271500644 to be close to 1, received difference is 0.631989728499356, but expected 5e-7
+ ❯ packages/webxr-interactions/test/behaviours.test.ts:243:50
+    241|     const start: InteractorInfo = { ...interactor, indexTip: [1, 0, 0]…
+    242|     const next: InteractorInfo = { ...interactor, indexTip: [...tip] };
+    243|     expect(valueAfter(make, moved, start, next)).toBeCloseTo(valueAfte…
+       |                                                  ^
+    244|   });
+    245| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 passed (13)
+   Start at  15:51:36
+   Duration  500ms (transform 206ms, setup 0ms, import 276ms, tests 14ms, environment 0ms)
+

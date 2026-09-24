@@ -60,7 +60,7 @@ describe("ThreeHitTester", () => {
 });
 
 describe("ThreeTransformPort", () => {
-  it("applies offsets/rotations from rest and reports the rest world pose", () => {
+  it("applies offsets/rotations from rest and reports the live and rest world poses", () => {
     const parent = new Object3D();
     parent.position.set(1, 0, 0);
     const object = new Mesh(new BoxGeometry(0.1, 0.1, 0.1));
@@ -69,14 +69,15 @@ describe("ThreeTransformPort", () => {
     parent.updateMatrixWorld(true);
 
     const port = new ThreeTransformPort(object);
-    const rest = port.getWorldPose();
-    expect(rest.position).toEqual([1, 1, 0]);
+    expect(port.getRestWorldPose().position).toEqual([1, 1, 0]);
+    expect(port.getWorldPose().position).toEqual([1, 1, 0]);
 
     port.setLocalOffset([0, -0.02, 0]);
     expect(object.position.y).toBeCloseTo(0.98, 5);
     expect(port.getLocalOffset()[1]).toBeCloseTo(-0.02, 5);
-    // The rest world pose is unaffected by behaviour-applied offsets.
-    expect(port.getWorldPose().position).toEqual([1, 1, 0]);
+    // The live pose follows the offset; the rest pose does not.
+    expect(port.getWorldPose().position[1]).toBeCloseTo(0.98, 5);
+    expect(port.getRestWorldPose().position).toEqual([1, 1, 0]);
 
     port.setLocalRotation([0, 0.7071067811865476, 0, 0.7071067811865476]);
     expect(object.quaternion.y).toBeCloseTo(0.7071, 3);

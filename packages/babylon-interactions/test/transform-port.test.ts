@@ -110,6 +110,32 @@ describe("BabylonTransformPort world pose", () => {
     new BabylonTransformPort(node).setWorldPose({ position: [4, 5, 6], quaternion: [0, 0, 0, 1] });
     expect(node.position).toEqual({ x: 4, y: 5, z: 6 });
   });
+
+  it("reports the rest pose through a rotated parent, and it stays put while the node moves", () => {
+    const parent = new FakeNode({ absolutePosition: [0, 1, 0], absoluteRotation: HALF_TURN_Y });
+    const node = new FakeNode({ parent, position: [0, 0, 1], rotationQuaternion: [0, 0, 0, 1] });
+    const port = new BabylonTransformPort(node);
+    const expectRest = (): void => {
+      const rest = port.getRestWorldPose();
+      expect(rest.position[0]).toBeCloseTo(0);
+      expect(rest.position[1]).toBeCloseTo(1);
+      expect(rest.position[2]).toBeCloseTo(-1);
+      expect(Math.abs(rest.quaternion[1])).toBeCloseTo(1);
+    };
+    expectRest();
+    expect(parent.computeWorldMatrixCalls).toBe(1);
+    port.setLocalOffset([0, 2, 0]);
+    expectRest();
+  });
+
+  it("reports an unparented rest pose as fresh tuples", () => {
+    const node = new FakeNode({ position: [1, 2, 3], rotationQuaternion: HALF_TURN_Y });
+    const port = new BabylonTransformPort(node);
+    const rest = port.getRestWorldPose();
+    expect(rest).toEqual({ position: [1, 2, 3], quaternion: [0, 1, 0, 0] });
+    rest.position[0] = 9;
+    expect(port.getRestWorldPose().position[0]).toBe(1);
+  });
 });
 
 describe("BabylonTransformPort effects", () => {

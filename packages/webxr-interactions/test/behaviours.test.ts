@@ -212,3 +212,34 @@ describe("hinge with a rotated mount", () => {
     expect(hinge.getValue()).toBeCloseTo(0.5, 5);
   });
 });
+
+describe("hinge, dial and slide measure from the rest pose", () => {
+  // A live pose far from rest and turned, as it is while a behaviour drives
+  // the object. A behaviour that read it would chase its own output.
+  const moved: PoseTuple = { position: [5, -3, 2], quaternion: quatFromAxisAngle([0, 0, 1], Math.PI / 3) };
+
+  function valueAfter(
+    make: () => HingeBehaviour | DialBehaviour | SlideBehaviour,
+    live: PoseTuple | null,
+    start: InteractorInfo,
+    next: InteractorInfo,
+  ): number {
+    const behaviour = make();
+    const t = new FakeTransform();
+    t.worldPose = live;
+    const { context } = ctx(t);
+    behaviour.onGrabStart(context, start);
+    behaviour.update(context, next);
+    return behaviour.getValue();
+  }
+
+  it.each([
+    ["hinge", () => new HingeBehaviour({ axis: [1, 0, 0], restDir: [0, 1, 0] }), [0, 0.7, 0.7]],
+    ["dial", () => new DialBehaviour({ axis: [0, 1, 0], maxAngle: Math.PI }), [0, 0, -1]],
+    ["slide", () => new SlideBehaviour({ axis: [0, 1, 0], travel: 0.3 }), [0, -0.15, 0]],
+  ] as const)("%s ignores where the live pose has moved", (_name, make, tip) => {
+    const start: InteractorInfo = { ...interactor, indexTip: [1, 0, 0] };
+    const next: InteractorInfo = { ...interactor, indexTip: [...tip] };
+    expect(valueAfter(make, moved, start, next)).toBeCloseTo(valueAfter(make, null, start, next), 6);
+  });
+});

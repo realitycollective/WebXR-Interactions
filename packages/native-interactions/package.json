@@ -1,0 +1,55 @@
+{
+  "name": "@realitycollective/native-interactions",
+  "version": "0.1.1-preview.0",
+  "description": "Native host adapter for the Reality Collective Interaction Extensions - reads the `input` and `interactions` slices a native app (OpenXR, visionOS) installs on `globalThis.__rcHost`, or an injected fake, and maps them into the engine-free @realitycollective/webxr-interactions core. No engine dependency: assets and rendering stay in the native app. Re-exports the core.",
+  "keywords": [
+    "realitycollective",
+    "native",
+    "openxr",
+    "visionos",
+    "webxr",
+    "xr",
+    "interaction",
+    "input",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@realitycollective/webxr-input": "^0.1.4",
+    "@realitycollective/webxr-interactions": "^0.1.1-preview.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Interactions.git",
+    "directory": "packages/native-interactions"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Interactions#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Interactions/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

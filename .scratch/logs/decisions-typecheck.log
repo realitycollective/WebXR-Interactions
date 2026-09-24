@@ -1,0 +1,32 @@
+
+> webxr-interactions-workspace@0.1.0 typecheck
+> npm run typecheck --workspaces --if-present
+
+
+> @realitycollective/babylon-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/iwsdk-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/native-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/threejs-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/webxr-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/xrblocks-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> playground-demo@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
