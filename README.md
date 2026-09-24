@@ -1,5 +1,10 @@
 # WebXR Interactions
 
+| Branch | Build | Publish | Published on npm |
+| --- | --- | --- | --- |
+| `main` | [![main build](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Interactions/ci.yml?branch=main&label=build)](https://github.com/realitycollective/WebXR-Interactions/actions/workflows/ci.yml?query=branch%3Amain) | [![main publish](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Interactions/publish-npm.yml?branch=main&label=publish)](https://github.com/realitycollective/WebXR-Interactions/actions/workflows/publish-npm.yml?query=branch%3Amain) | [![npm latest](https://img.shields.io/npm/v/@realitycollective/webxr-interactions/latest?label=npm%20latest)](https://www.npmjs.com/package/@realitycollective/webxr-interactions?activeTab=versions) |
+| `development` | [![development build](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Interactions/ci.yml?branch=development&label=build)](https://github.com/realitycollective/WebXR-Interactions/actions/workflows/ci.yml?query=branch%3Adevelopment) | [![development publish](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Interactions/publish-npm.yml?branch=development&label=publish)](https://github.com/realitycollective/WebXR-Interactions/actions/workflows/publish-npm.yml?query=branch%3Adevelopment) | [![npm preview](https://img.shields.io/npm/v/@realitycollective/webxr-interactions/preview?label=npm%20preview)](https://www.npmjs.com/package/@realitycollective/webxr-interactions?activeTab=versions) |
+
 WebXR Interactions adds interactive objects to a WebXR scene: buttons, levers, dials, grabbable items. The interaction logic has no 3D engine code in it. You add one adapter for the engine you already use, and that adapter feeds the shared logic.
 
 Two words appear throughout:
@@ -68,8 +73,8 @@ Two workflows ship in every Reality Collective TypeScript repository, with the s
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| `ci.yml` | every PR + push to `main` / `development` | Build, typecheck, test with coverage gates, `verify:pack`, playground build. On a PR it then deploys to `webxr-interactions-test`; on a push to `main`, to production. The deploy steps skip when the Cloudflare secrets are absent, leaving a pure build gate |
-| `publish-npm.yml` | manual dispatch | packs all five packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
+| `ci.yml` | every PR + push to `main` / `development` | Build, typecheck, test with coverage gates, `verify:pack`, playground build. On a PR it then deploys to `webxr-interactions-test`; on a push to `main`, to production. The deploy steps skip when the Cloudflare secrets are absent, leaving a pure build gate. After a merged PR passes, it queues a publish dry run on the branch the PR merged into |
+| `publish-npm.yml` | manual dispatch, plus the dry run CI queues after a merged PR | packs all five packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
 
 ## Commands
 
