@@ -44,7 +44,7 @@ export interface BehaviourContext {
   transform: TransformPort | undefined;
   emit(event: Omit<InteractionEvent, "interactableId">): void;
   feedback(intent: Omit<FeedbackIntent, "interactableId">): void;
-  /** REST world pose of another registered interactable (toss scoring). */
+  /** LIVE world pose of another registered interactable (toss scoring). */
   getWorldPose(interactableId: string): PoseTuple | undefined;
 }
 

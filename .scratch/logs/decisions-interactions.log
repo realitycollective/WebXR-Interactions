@@ -1,0 +1,205 @@
+
+> webxr-interactions-workspace@0.1.0 build
+> npm --workspace @realitycollective/webxr-interactions run build && npm --workspace @realitycollective/threejs-interactions run build && npm --workspace @realitycollective/babylon-interactions run build && npm --workspace @realitycollective/iwsdk-interactions run build && npm --workspace @realitycollective/xrblocks-interactions run build && npm --workspace @realitycollective/native-interactions run build
+
+
+> @realitycollective/webxr-interactions@0.1.1-preview.0 build
+> tsc -p tsconfig.build.json
+
+
+> @realitycollective/threejs-interactions@0.1.1-preview.0 build
+> tsc -p tsconfig.build.json
+
+
+> @realitycollective/babylon-interactions@0.1.1-preview.0 build
+> tsc -p tsconfig.build.json
+
+
+> @realitycollective/iwsdk-interactions@0.1.1-preview.0 build
+> tsc -p tsconfig.build.json
+
+
+> @realitycollective/xrblocks-interactions@0.1.1-preview.0 build
+> tsc -p tsconfig.build.json
+
+
+> @realitycollective/native-interactions@0.1.1-preview.0 build
+> tsc -p tsconfig.build.json
+
+
+> webxr-interactions-workspace@0.1.0 typecheck
+> npm run typecheck --workspaces --if-present
+
+
+> @realitycollective/babylon-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/iwsdk-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/native-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/threejs-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/webxr-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> @realitycollective/xrblocks-interactions@0.1.1-preview.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> playground-demo@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> webxr-interactions-workspace@0.1.0 test
+> vitest run --coverage
+
+
+ RUN  v4.1.11 C:/LD/01-RealityToolkit/WebXR/WebXR-Interactions
+      Coverage enabled with v8
+
+
+ Test Files  29 passed (29)
+      Tests  431 passed (431)
+   Start at  15:52:11
+   Duration  9.41s (transform 10.92s, setup 0ms, import 41.99s, tests 8.00s, environment 6ms)
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   89.52 |    84.14 |   86.95 |   90.99 |                   
+ ...teractions/src |   98.76 |    89.56 |     100 |     100 |                   
+  babylon-types.ts |     100 |       90 |     100 |     100 | 239,283           
+  hit-tester.ts    |   96.07 |     92.1 |     100 |     100 | 109,123-126       
+  host.ts          |     100 |    72.72 |     100 |     100 | 61,79,116         
+  provider.ts      |   98.85 |    90.14 |     100 |     100 | ...11,341-342,431 
+  ...sform-port.ts |     100 |    89.47 |     100 |     100 | 63,93             
+ ...teractions/src |   84.91 |    76.92 |   92.45 |   86.37 |                   
+  provider.ts      |   98.74 |    92.92 |     100 |     100 | 74-79,143-154,375 
+  register.ts      |   70.08 |     61.9 |   77.77 |   72.38 | ...34-257,278-280 
+  ...sform-port.ts |   77.04 |       45 |     100 |   79.66 | ...99,112-113,125 
+ ...teractions/src |   80.16 |    74.07 |   73.43 |   81.51 |                   
+  hit-tester.ts    |   98.27 |    92.59 |     100 |   98.07 | 138               
+  host.ts          |       0 |        0 |       0 |       0 | 31-73             
+  ...sform-port.ts |   98.36 |       80 |     100 |     100 | 104-107,119-121   
+  ...r-provider.ts |   76.79 |    70.71 |   72.22 |   78.71 | ...02-404,468-489 
+ ...teractions/src |   94.58 |    89.06 |   94.48 |   96.49 |                   
+  events.ts        |   85.71 |      100 |      75 |      80 | 59                
+  gaze.ts          |      92 |    69.23 |     100 |   95.45 | 69                
+  math.ts          |   92.18 |    90.32 |      96 |   94.82 | 204-206           
+  ...ter-bridge.ts |    93.1 |    83.33 |     100 |   92.59 | 64-65             
+  runtime.ts       |   92.75 |    89.01 |   90.38 |   95.65 | ...59,631,639,672 
+ ...src/behaviours |   87.72 |    80.51 |   66.12 |   90.45 |                   
+  dial.ts          |   88.88 |       64 |      75 |   93.02 | 113-118           
+  factory.ts       |   71.42 |       50 |   55.55 |      75 | 47,59,62-63       
+  grab.ts          |   93.33 |       90 |   83.33 |   96.42 | 41                
+  hinge.ts         |   93.54 |       80 |   71.42 |   93.54 | 102-106           
+  press.ts         |   85.41 |     93.1 |      50 |    85.1 | 133-149           
+  slide.ts         |   85.96 |    76.92 |      60 |   89.09 | 115-129           
+  toss-score.ts    |   86.66 |    66.66 |      60 |   92.85 | 74-78             
+ ...teractions/src |      70 |       80 |   55.55 |   69.23 |                   
+  host.ts          |       0 |        0 |       0 |       0 | 37-79             
+  provider.ts      |   90.74 |    84.21 |    90.9 |   91.83 | 174,214-216       
+-------------------|---------|----------|---------|---------|-------------------
+
+=============================== Coverage summary ===============================
+Statements   : 89.52% ( 1838/2053 )
+Branches     : 84.14% ( 1035/1230 )
+Functions    : 86.95% ( 380/437 )
+Lines        : 90.99% ( 1668/1833 )
+================================================================================
+
+> webxr-interactions-workspace@0.1.0 verify:pack
+> node scripts/verify-pack.mjs
+
+building packages...
+packing (as the publish workflow does)...
+installing the tarballs into a clean project...
+
+verifying the installed packages:
+  ok    webxr-interactions: ./dist/index.js present
+  ok    webxr-interactions: ./dist/index.d.ts present
+  ok    webxr-interactions: @realitycollective/webxr-input range "^0.1.4" is publishable (not "*")
+  ok    webxr-interactions: README shipped
+  ok    webxr-interactions: LICENSE shipped
+  ok    webxr-interactions: CHANGELOG.md shipped
+  ok    threejs-interactions: ./dist/index.js present
+  ok    threejs-interactions: ./dist/index.d.ts present
+  ok    threejs-interactions: @realitycollective/webxr-input range "^0.1.4" is publishable (not "*")
+  ok    threejs-interactions: @realitycollective/webxr-interactions range "^0.1.1-preview.0" is publishable (not "*")
+  ok    threejs-interactions: README shipped
+  ok    threejs-interactions: LICENSE shipped
+  ok    threejs-interactions: CHANGELOG.md shipped
+  ok    babylon-interactions: ./dist/index.js present
+  ok    babylon-interactions: ./dist/index.d.ts present
+  ok    babylon-interactions: @realitycollective/webxr-input range "^0.1.4" is publishable (not "*")
+  ok    babylon-interactions: @realitycollective/webxr-interactions range "^0.1.1-preview.0" is publishable (not "*")
+  ok    babylon-interactions: README shipped
+  ok    babylon-interactions: LICENSE shipped
+  ok    babylon-interactions: CHANGELOG.md shipped
+  ok    iwsdk-interactions: ./dist/index.js present
+  ok    iwsdk-interactions: ./dist/index.d.ts present
+  ok    iwsdk-interactions: @realitycollective/webxr-input range "^0.1.4" is publishable (not "*")
+  ok    iwsdk-interactions: @realitycollective/webxr-interactions range "^0.1.1-preview.0" is publishable (not "*")
+  ok    iwsdk-interactions: README shipped
+  ok    iwsdk-interactions: LICENSE shipped
+  ok    iwsdk-interactions: CHANGELOG.md shipped
+  ok    xrblocks-interactions: ./dist/index.js present
+  ok    xrblocks-interactions: ./dist/index.d.ts present
+  ok    xrblocks-interactions: @realitycollective/webxr-input range "^0.1.4" is publishable (not "*")
+  ok    xrblocks-interactions: @realitycollective/webxr-interactions range "^0.1.1-preview.0" is publishable (not "*")
+  ok    xrblocks-interactions: @realitycollective/threejs-interactions range "^0.1.1-preview.0" is publishable (not "*")
+  ok    xrblocks-interactions: README shipped
+  ok    xrblocks-interactions: LICENSE shipped
+  ok    xrblocks-interactions: CHANGELOG.md shipped
+  ok    native-interactions: ./dist/index.js present
+  ok    native-interactions: ./dist/index.d.ts present
+  ok    native-interactions: @realitycollective/webxr-input range "^0.1.4" is publishable (not "*")
+  ok    native-interactions: @realitycollective/webxr-interactions range "^0.1.1-preview.0" is publishable (not "*")
+  ok    native-interactions: README shipped
+  ok    native-interactions: LICENSE shipped
+  ok    native-interactions: CHANGELOG.md shipped
+  ok    webxr-interactions: imports in plain node (56 exports)
+  ok    babylon-interactions: imports in plain node (74 exports)
+  ok    native-interactions: imports in plain node (61 exports)
+
+linting the shape of the published packages:
+  ok    webxr-interactions: publint finds no packaging problems
+  ok    webxr-interactions: published types resolve under every module resolution mode
+  ok    threejs-interactions: publint finds no packaging problems
+  ok    threejs-interactions: published types resolve under every module resolution mode
+  ok    babylon-interactions: publint finds no packaging problems
+  ok    babylon-interactions: published types resolve under every module resolution mode
+  ok    iwsdk-interactions: publint finds no packaging problems
+  ok    iwsdk-interactions: published types resolve under every module resolution mode
+  ok    xrblocks-interactions: publint finds no packaging problems
+  ok    xrblocks-interactions: published types resolve under every module resolution mode
+  ok    native-interactions: publint finds no packaging problems
+  ok    native-interactions: published types resolve under every module resolution mode
+
+type-checking the published declarations with library checking on:
+  ok    nodenext: the check reaches 960 foreign declaration file(s). At zero it cannot fail, and the build already covers what is left, so drop "declarationCheck" from scripts/release.config.json rather than keep a gate that only ever passes.
+  ok    webxr-interactions: dist/index.d.ts type-checks under nodenext (57 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    threejs-interactions: dist/index.d.ts type-checks under nodenext (57 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    babylon-interactions: dist/index.d.ts type-checks under nodenext (57 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    iwsdk-interactions: dist/index.d.ts type-checks under nodenext (57 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    xrblocks-interactions: dist/index.d.ts type-checks under nodenext (57 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    native-interactions: dist/index.d.ts type-checks under nodenext (57 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    bundler: the check reaches 960 foreign declaration file(s). At zero it cannot fail, and the build already covers what is left, so drop "declarationCheck" from scripts/release.config.json rather than keep a gate that only ever passes.
+  ok    webxr-interactions: dist/index.d.ts type-checks under bundler (56 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    threejs-interactions: dist/index.d.ts type-checks under bundler (56 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    babylon-interactions: dist/index.d.ts type-checks under bundler (56 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    iwsdk-interactions: dist/index.d.ts type-checks under bundler (56 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    xrblocks-interactions: dist/index.d.ts type-checks under bundler (56 diagnostic(s) in 960 foreign file(s), ignored)
+  ok    native-interactions: dist/index.d.ts type-checks under bundler (56 diagnostic(s) in 960 foreign file(s), ignored)
+
+verify:pack passed - the published artifact is consumable.

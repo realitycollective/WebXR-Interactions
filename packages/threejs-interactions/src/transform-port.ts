@@ -1,9 +1,10 @@
 /**
  * ThreeTransformPort - the write/read surface of one interactable's
  * Object3D, honouring the core's FROM-REST semantics: the rest pose is
- * captured at construction, offsets/rotations apply relative to it, and
- * `getWorldPose()` reports the REST pose in world space (external movers
- * that reposition the object should call `recaptureRest()`).
+ * captured at construction and offsets/rotations apply relative to it.
+ * `getWorldPose()` reports where the object is now, and `getRestWorldPose()`
+ * reports the rest pose in world space. An external mover that repositions
+ * the object for good should call `recaptureRest()`.
  */
 import {
   Matrix4,
@@ -42,6 +43,15 @@ export class ThreeTransformPort implements TransformPort {
   }
 
   getWorldPose(): PoseTuple {
+    this.object.getWorldPosition(this.v);
+    this.object.getWorldQuaternion(this.q);
+    return {
+      position: [this.v.x, this.v.y, this.v.z],
+      quaternion: [this.q.x, this.q.y, this.q.z, this.q.w],
+    };
+  }
+
+  getRestWorldPose(): PoseTuple {
     const parent = this.object.parent;
     if (parent) {
       parent.updateWorldMatrix(true, false);

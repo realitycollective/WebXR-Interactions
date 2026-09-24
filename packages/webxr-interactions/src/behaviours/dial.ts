@@ -49,7 +49,7 @@ export class DialBehaviour implements Behaviour {
     const hand = holderPoint(holder);
     const transform = ctx.transform;
     if (!hand || !transform) return null;
-    const rest = transform.getWorldPose();
+    const rest = transform.getRestWorldPose();
     const local = worldToLocal(hand, rest.position, rest.quaternion);
     // Project onto the plane perpendicular to the axis.
     const along = vDot(local, this.axis);

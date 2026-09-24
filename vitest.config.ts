@@ -12,6 +12,7 @@ export default defineConfig({
       "@realitycollective/babylon-interactions": pkg("babylon-interactions"),
       "@realitycollective/iwsdk-interactions": pkg("iwsdk-interactions"),
       "@realitycollective/xrblocks-interactions": pkg("xrblocks-interactions"),
+      "@realitycollective/native-interactions": pkg("native-interactions"),
     },
   },
   test: {
@@ -40,6 +41,7 @@ export default defineConfig({
         "packages/babylon-interactions/src/index.ts",
         "packages/iwsdk-interactions/src/index.ts",
         "packages/xrblocks-interactions/src/index.ts",
+        "packages/native-interactions/src/index.ts",
       ],
       // Anti-regression ratchets, one per package, each set to the floor that
       // package actually measures today. Per-package rather than one global
@@ -101,6 +103,15 @@ export default defineConfig({
           branches: 52,
           functions: 55,
           statements: 53,
+        },
+        // No engine peer at all - every branch is reachable from an
+        // in-memory fake of the two host slices, so this package holds the
+        // house standard from day one.
+        "packages/native-interactions/src/**": {
+          lines: 100,
+          branches: 100,
+          functions: 100,
+          statements: 100,
         },
       },
     },

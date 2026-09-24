@@ -29,6 +29,10 @@ All input arrives through the shared [`@realitycollective/webxr-input`](https://
 - **Events out, never callbacks in.** The core never reaches into your objects.
 - **Fail loudly, not silently.** A behaviour the hardware cannot support reports `behaviourDisabled` instead of quietly doing nothing.
 
+## Conformance suites
+
+Every adapter implements `HitTester` and `TransformPort` (see `ports.ts`) against its own scene graph, so this package ships the checks as data rather than as tests: `hitTesterContractCases()` and `transformPortContractCases()`, alongside `inputProviderContractCases()` from [`@realitycollective/webxr-input`](https://www.npmjs.com/package/@realitycollective/webxr-input) for `InputProvider`. Each case throws a plain `Error` naming the rule a platform broke, so any test runner can host it - an adapter written outside this repository runs the same suite its own way. All three run against every platform in `packages/iwsdk-interactions/test/`, next to each other: `provider-parity.test.ts` for `InputProvider`, `port-parity.test.ts` for `HitTester` and `TransformPort`.
+
 ## Live demo
 
 The interaction playground - the full station set, mouse-capable on desktop, VR button for headsets: **[webxr-interactions.pages.dev](https://webxr-interactions.pages.dev)**

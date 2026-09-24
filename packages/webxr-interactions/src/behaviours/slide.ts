@@ -50,7 +50,7 @@ export class SlideBehaviour implements Behaviour {
     const hand = holderPoint(holder);
     const transform = ctx.transform;
     if (!hand || !transform) return null;
-    const rest = transform.getWorldPose();
+    const rest = transform.getRestWorldPose();
     const local = worldToLocal(hand, rest.position, rest.quaternion);
     // Pull is measured along −axis.
     return -vDot(local, this.axis);

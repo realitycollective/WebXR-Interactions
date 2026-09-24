@@ -5,11 +5,13 @@
     "threejs-interactions",
     "babylon-interactions",
     "iwsdk-interactions",
-    "xrblocks-interactions"
+    "xrblocks-interactions",
+    "native-interactions"
   ],
   "importCheck": [
     "webxr-interactions",
-    "babylon-interactions"
+    "babylon-interactions",
+    "native-interactions"
   ],
   "declarationCheck": true,
   "legacyPeerDeps": true,

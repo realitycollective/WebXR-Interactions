@@ -1,12 +1,12 @@
 /**
  * Every adapter implements the same provider contract.
  *
- * Four providers built against four different engines is exactly the
+ * Five providers built against five different hosts is exactly the
  * shape of defect that hides: one of them quietly drops a method, and
  * nothing notices until an app swaps adapters. The checks themselves are
  * the shared suite shipped by `@realitycollective/webxr-input`, so this
  * repository cannot drift from the contract it implements; this file only
- * builds the four instances and adds what the shared suite does not cover.
+ * builds the five instances and adds what the shared suite does not cover.
  */
 import { describe, expect, it } from "vitest";
 import { PerspectiveCamera } from "three";
@@ -20,6 +20,8 @@ import { IWSDKInputProvider } from "@realitycollective/iwsdk-interactions";
 import { WebXRInputProvider } from "@realitycollective/threejs-interactions";
 import { XRBlocksInputProvider } from "@realitycollective/xrblocks-interactions";
 import { BabylonInputProvider } from "@realitycollective/babylon-interactions";
+import { NativeInputProvider } from "@realitycollective/native-interactions";
+import { FakeInputHost } from "../../native-interactions/test/helpers.js";
 import { FakeGamepad, FakeSession, fakeActuator, makeWorld } from "./helpers.js";
 
 /** The members `InputProvider` requires of every implementation. */
@@ -85,11 +87,22 @@ function babylonProvider(): Built {
   return { provider };
 }
 
+function nativeProvider(): Built {
+  // The fake host reuses one pooled snapshot across samples, as a native app
+  // might, so the ownership case proves the provider copies what it hands over.
+  const host = new FakeInputHost({ headPose: true, pulse: true, presence: true });
+  return {
+    provider: new NativeInputProvider({ input: host }),
+    driver: { enterSession: () => host.enterSession(), exitSession: () => host.exitSession() },
+  };
+}
+
 const providers: Array<[string, () => Built]> = [
   ["iwsdk", iwsdkProvider],
   ["threejs", threeProvider],
   ["xrblocks", xrBlocksProvider],
   ["babylon", babylonProvider],
+  ["native", nativeProvider],
 ];
 
 describe.each(providers)("%s provider", (_name, build) => {
@@ -101,7 +114,7 @@ describe.each(providers)("%s provider", (_name, build) => {
   }
 
   // Adapter-specific, on top of the shared suite: the contract cases call
-  // these members, but never assert that all four are present as functions.
+  // these members, but never assert that all of them are present as functions.
   it("implements every required InputProvider member", () => {
     const provider = build().provider as unknown as Record<string, unknown>;
     for (const member of REQUIRED) {
@@ -111,7 +124,7 @@ describe.each(providers)("%s provider", (_name, build) => {
 
   // The shared suite checks the capability KEYS and the methods a true
   // presence flag implies. It cannot check the value's type, and presence
-  // is the one capability whose value differs across these four.
+  // is the one capability whose value differs across these providers.
   it("answers capabilities.presence with a boolean", () => {
     expect(typeof build().provider.getCapabilities().presence).toBe("boolean");
   });

@@ -1,7 +1,8 @@
 /**
  * IWSDKTransformPort - the core's TransformPort over an IWSDK entity's
- * `object3D`, honouring FROM-REST semantics (rest captured at
- * construction; `getWorldPose()` reports the rest pose in world space).
+ * `object3D`, honouring FROM-REST semantics: the rest pose is captured at
+ * construction, `getWorldPose()` reports the live pose and
+ * `getRestWorldPose()` the rest pose, both in world space.
  * Same math as the three.js adapter's port. The three.js classes come from
  * `three` itself, a declared peer, rather than through `@iwsdk/core`'s
  * `export * from 'three'`: a consumer that excludes `three` from Vite's
@@ -44,6 +45,15 @@ export class IWSDKTransformPort implements TransformPort {
   }
 
   getWorldPose(): PoseTuple {
+    this.object.getWorldPosition(this.v);
+    this.object.getWorldQuaternion(this.q);
+    return {
+      position: [this.v.x, this.v.y, this.v.z],
+      quaternion: [this.q.x, this.q.y, this.q.z, this.q.w],
+    };
+  }
+
+  getRestWorldPose(): PoseTuple {
     const parent = this.object.parent;
     if (parent) {
       parent.updateWorldMatrix(true, false);
