@@ -17,6 +17,11 @@
  */
 import {
   Grabbed,
+  PhysicsBody,
+  PhysicsManipulation,
+  PhysicsShape,
+  PhysicsState,
+  PhysicsSystem,
   PokeInteractable,
   Pressed,
   RayInteractable,
@@ -30,11 +35,12 @@ import {
   InteractionRuntime,
   type DwellConfig,
   type HitTester,
+  type HoldRelease,
   type InteractableDescriptor,
   type InteractableHit,
 } from "@realitycollective/webxr-interactions";
 import { IWSDKInputProvider, type IWSDKProviderOptions } from "./provider.js";
-import { IWSDKTransformPort } from "./transform-port.js";
+import { IWSDKTransformPort, type IWSDKPhysicsBinding } from "./transform-port.js";
 
 const TEMP_V = new Vector3();
 
@@ -135,6 +141,62 @@ class EntityHitTester implements HitTester {
   }
 }
 
+/**
+ * Builds the `poseOnly` grab's held-pose binding for an entity with physics,
+ * from `@iwsdk/core`'s own public API - never the `Grabbed` tag `GrabSystem`
+ * owns (its own doc says "do not add/remove this component manually"; it is
+ * IWSDK's native-grab mechanism, not ours), and never the private Havok
+ * handle `PhysicsSystem` keeps to itself.
+ *
+ * - `beginHold` removes `PhysicsBody` (keeping `PhysicsShape`): the entity
+ *   drops out of `PhysicsSystem`'s `physicsEntities` query, which tears
+ *   down its Havok body (see `physics-system.js`'s `disqualify` handler) -
+ *   gravity and collisions stop, and nothing syncs the object3D from
+ *   physics any more, so `IWSDKTransformPort.setWorldPose` writes stick.
+ * - `endHold` re-adds `PhysicsBody` at the SAME state the entity had
+ *   before the hold, so `PhysicsSystem` recreates the body next tick at
+ *   wherever the hold left the object3D, then adds `PhysicsManipulation`
+ *   with the release velocities (a no-op for an axis that is exactly zero
+ *   - see `PhysicsManipulation`'s own doc - so a zero release is the same
+ *   as not asking for one).
+ * - `teleport` is `PhysicsSystem.setBodyTransform`, which mirrors the pose
+ *   onto object3D immediately and clears velocity by default - IWSDK's own
+ *   "reset/home-position" primitive, reused rather than reimplemented.
+ *
+ * `undefined` when the entity has no `PhysicsBody`/`PhysicsShape`, or the
+ * world carries no `PhysicsSystem` - the app never added physics, so the
+ * port behaves exactly as it did before this feature existed.
+ */
+function physicsBindingFor(entity: Entity, world: World): IWSDKPhysicsBinding | undefined {
+  if (!entity.hasComponent(PhysicsBody) || !entity.hasComponent(PhysicsShape)) return undefined;
+  const physicsSystem = world.getSystem(PhysicsSystem);
+  if (!physicsSystem) return undefined;
+
+  let heldState: (typeof PhysicsState)[keyof typeof PhysicsState] = PhysicsState.Dynamic;
+
+  return {
+    beginHold() {
+      heldState = (entity.getValue(PhysicsBody, "state") as typeof heldState | null) ?? PhysicsState.Dynamic;
+      entity.removeComponent(PhysicsBody);
+    },
+    endHold(release: HoldRelease) {
+      entity.addComponent(PhysicsBody, { state: heldState });
+      const { linearVelocity, angularVelocity } = release;
+      const hasVelocity =
+        linearVelocity.some((v) => v !== 0) || angularVelocity.some((v) => v !== 0);
+      if (hasVelocity) {
+        entity.addComponent(PhysicsManipulation, {
+          linearVelocity: [...linearVelocity],
+          angularVelocity: [...angularVelocity],
+        });
+      }
+    },
+    teleport(pose) {
+      physicsSystem.setBodyTransform(entity, { position: pose.position, quaternion: pose.quaternion });
+    },
+  };
+}
+
 export interface IWSDKRegisterOptions extends IWSDKProviderOptions {
   dwellDefaults?: DwellConfig;
 }
@@ -179,7 +241,8 @@ export class IWSDKInteractions {
     const object = entity.object3D;
     let port: IWSDKTransformPort | undefined;
     if (object) {
-      port = new IWSDKTransformPort(object);
+      const physics = physicsBindingFor(entity, this.world);
+      port = new IWSDKTransformPort(object, physics ? { physics } : {});
       this.ports.set(descriptor.id, port);
     }
     this.runtime.registerInteractable(descriptor, port ? { transform: port } : {});

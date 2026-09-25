@@ -32,6 +32,7 @@ import type {
   Unsubscribe,
   Vec3Tuple,
 } from "@realitycollective/webxr-input";
+import type { HoldRelease } from "@realitycollective/webxr-interactions";
 
 /** The native host's `input` slice. Mirrors `InputProvider` member for member. */
 export interface NativeInputHost {
@@ -74,6 +75,16 @@ export interface NativeInteractionHost {
   setLocalRotation(targetId: string, quaternion: QuatTuple): void;
   setWorldPose?(targetId: string, pose: PoseTuple): void;
   setEffect?(targetId: string, effect: { scale?: number; emissive?: number }): void;
+  /**
+   * Suspend physics for `targetId` - see `TransformPort.beginHold` in
+   * `@realitycollective/webxr-interactions`. Present only on a host that
+   * can drive its own physics this way; a host with no physics, or a
+   * native app that fulfils grabs itself through its own engine, never
+   * needs it - see this package's README.
+   */
+  beginHold?(targetId: string): void;
+  /** Resume physics for `targetId` with `release` as its new velocity. */
+  endHold?(targetId: string, release: HoldRelease): void;
 }
 
 /**

@@ -307,7 +307,21 @@ export class InteractionRuntime {
   }
 
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
+    // A disposed runtime still owes every held grab exactly one `endHold`
+    // (zero velocity - nothing threw it away, the scene just went down),
+    // so physics never stays suspended once nothing is left to resume it.
+    for (const [id, registered] of this.interactables) {
+      if (registered.grabbedBy) {
+        this.endGrab(id, registered.grabbedBy, {
+          id: registered.grabbedBy,
+          kind: "other",
+          select: 0,
+          squeeze: 0,
+        });
+      }
+    }
     this.unsubscribeCaps();
     this.interactables.clear();
     this.sourceStates.clear();
@@ -336,6 +350,8 @@ export class InteractionRuntime {
     if (source.ray) info.ray = source.ray;
     if (source.gripPose) info.gripPose = source.gripPose;
     if (source.indexTip) info.indexTip = source.indexTip;
+    if (source.linearVelocity) info.linearVelocity = source.linearVelocity;
+    if (source.angularVelocity) info.angularVelocity = source.angularVelocity;
     return info;
   }
 

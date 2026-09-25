@@ -11,7 +11,7 @@
  * hook, sees a port without one rather than a method that silently no-ops.
  */
 import type { PoseTuple, QuatTuple, Vec3Tuple } from "@realitycollective/webxr-input";
-import type { TransformPort } from "@realitycollective/webxr-interactions";
+import type { HoldRelease, TransformPort } from "@realitycollective/webxr-interactions";
 import {
   copyPose,
   copyQuat,
@@ -31,6 +31,8 @@ export class NativeTransformPort implements TransformPort {
 
   readonly setWorldPose?: (pose: PoseTuple) => void;
   readonly setEffect?: (effect: { scale?: number; emissive?: number }) => void;
+  readonly beginHold?: () => void;
+  readonly endHold?: (release: HoldRelease) => void;
 
   constructor(targetId: string, options: NativeTransformPortOptions = {}) {
     this.targetId = targetId;
@@ -43,6 +45,18 @@ export class NativeTransformPort implements TransformPort {
     if (this.host.setEffect) {
       const host = this.host;
       this.setEffect = (effect) => host.setEffect!(targetId, effect);
+    }
+    if (this.host.beginHold) {
+      const host = this.host;
+      this.beginHold = () => host.beginHold!(targetId);
+    }
+    if (this.host.endHold) {
+      const host = this.host;
+      this.endHold = (release) =>
+        host.endHold!(targetId, {
+          linearVelocity: copyVec3(release.linearVelocity),
+          angularVelocity: copyVec3(release.angularVelocity),
+        });
     }
   }
 

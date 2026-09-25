@@ -71,6 +71,32 @@ export interface BabylonTransformNodeLike {
   setEnabled?(value: boolean): void;
   isEnabled?(checkAncestors?: boolean): boolean;
   isVisible?: boolean;
+  /** Present only on a node Physics V2 has a body for - see {@link BabylonPhysicsBodyLike}. */
+  physicsBody?: BabylonPhysicsBodyLike;
+}
+
+/**
+ * Structural slice of Babylon's `PhysicsBody` (Physics V2, Havok or any
+ * other plugin behind the same API) - present on `BabylonTransformNodeLike`
+ * only when the node has one. Written from the Babylon 7 Physics V2
+ * documentation, on the same honesty terms as the rest of this file: this
+ * package has no `@babylonjs/core` (or `@babylonjs/havok`) dependency to
+ * verify it against, so `BabylonTransformPort`'s held-pose behaviour is
+ * unverified against a live Babylon scene, and the maintainer should
+ * confirm it there before shipping.
+ *
+ * `disablePreStep` is Babylon's switch for which way a body and its node
+ * agree on the truth: `false` (the default) is physics-drives-node - the
+ * simulation writes the node's transform every step; `true` is
+ * node-drives-physics - Babylon reads the node's transform instead of
+ * writing it. Held, released and reset all briefly need the second
+ * direction, so the port toggles it around each of the three.
+ */
+export interface BabylonPhysicsBodyLike {
+  disablePreStep: boolean;
+  setMotionType(motionType: unknown): void;
+  setLinearVelocity(velocity: BabylonVector3Like): void;
+  setAngularVelocity(velocity: BabylonVector3Like): void;
 }
 
 /** Structural slice of Babylon's `Camera`. */

@@ -31,13 +31,17 @@ import {
 } from "@realitycollective/webxr-interactions";
 import { BabylonHitTester, BabylonTransformPort } from "@realitycollective/babylon-interactions";
 import { ThreeHitTester, ThreeTransformPort } from "@realitycollective/threejs-interactions";
-import { IWSDKTransformPort, registerInteractions } from "@realitycollective/iwsdk-interactions";
+import {
+  IWSDKTransformPort,
+  registerInteractions,
+  type IWSDKPhysicsBinding,
+} from "@realitycollective/iwsdk-interactions";
 import {
   ThreeHitTester as XRBlocksHitTester,
   ThreeTransformPort as XRBlocksTransformPort,
 } from "@realitycollective/xrblocks-interactions";
 import { NativeHitTester, NativeTransformPort, type NativeHit } from "@realitycollective/native-interactions";
-import { FakeNode } from "../../babylon-interactions/test/helpers.js";
+import { FakeNode, PHYSICS_MOTION_TYPES } from "../../babylon-interactions/test/helpers.js";
 import { FakeInteractionHost } from "../../native-interactions/test/helpers.js";
 import { FakeSession, makeWorld } from "./helpers.js";
 
@@ -67,11 +71,19 @@ class GeometricInteractionHost extends FakeInteractionHost {
   private readonly rests = new Map<string, PoseTuple>();
   private readonly lives = new Map<string, PoseTuple>();
 
-  constructor(capable: { setWorldPose?: boolean; setEffect?: boolean } = {}) {
+  constructor(capable: { setWorldPose?: boolean; setEffect?: boolean; physics?: boolean } = {}) {
     super(capable);
     if (capable.setWorldPose) {
-      this.setWorldPose = (targetId, pose) => this.lives.set(targetId, clonePose(pose));
+      this.setWorldPose = (targetId, pose) => {
+        this.lives.set(targetId, clonePose(pose));
+        this.clearVelocityIfNotHeld(targetId);
+      };
     }
+  }
+
+  /** `step()`/the base's `setWorldPose` write live poses here instead of the base's own `poses` map. */
+  protected override writeLivePose(targetId: string, pose: PoseTuple): void {
+    this.lives.set(targetId, clonePose(pose));
   }
 
   /** Register an object at a rest pose, as the native scene would. */
@@ -262,26 +274,79 @@ function objectAtRest(): Object3D {
   return object;
 }
 
-function nativePortAtRest(): NativeTransformPort {
-  const host = new GeometricInteractionHost({ setWorldPose: true, setEffect: true });
+function nativeTransformPortSubject(): TransformPortContractSubject {
+  const host = new GeometricInteractionHost({ setWorldPose: true, setEffect: true, physics: true });
   host.registerAt("target", REST_POSE);
-  return new NativeTransformPort("target", { interactions: host });
+  return {
+    port: new NativeTransformPort("target", { interactions: host }),
+    rest: REST_POSE,
+    physics: { step: (dt) => host.step("target", dt) },
+  };
+}
+
+/**
+ * A fake `IWSDKPhysicsBinding` for the held/released/reset contract cases -
+ * gravity-integrated over the SAME object3D the port writes, the same idea
+ * as `physics-binding.test.ts`'s fake `PhysicsSystem` but faithful to what
+ * a real Havok body would do frame to frame, since these cases step it
+ * repeatedly. The real binding (`register.ts`'s `physicsBindingFor`, built
+ * from `PhysicsBody`/`PhysicsShape`/`PhysicsManipulation`/`PhysicsSystem`)
+ * is exercised for real - against fakes of THOSE, not against Havok, which
+ * this package's tests cannot stand up - in `physics-binding.test.ts`.
+ */
+function fakeIWSDKPhysics(object: Object3D): { binding: IWSDKPhysicsBinding; step(dtSeconds: number): void } {
+  let held = false;
+  let velocity: Vec3Tuple = [0, 0, 0];
+  return {
+    binding: {
+      beginHold() {
+        held = true;
+      },
+      endHold(release) {
+        held = false;
+        velocity = [...release.linearVelocity];
+      },
+      teleport(pose) {
+        object.position.set(pose.position[0], pose.position[1], pose.position[2]);
+        object.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3]);
+        velocity = [0, 0, 0];
+      },
+    },
+    step(dtSeconds) {
+      if (held) return;
+      velocity = [velocity[0], velocity[1] - 9.8 * dtSeconds, velocity[2]];
+      object.position.x += velocity[0] * dtSeconds;
+      object.position.y += velocity[1] * dtSeconds;
+      object.position.z += velocity[2] * dtSeconds;
+    },
+  };
+}
+
+function iwsdkTransformPortSubject(): TransformPortContractSubject {
+  const object = objectAtRest();
+  const { binding, step } = fakeIWSDKPhysics(object);
+  return { port: new IWSDKTransformPort(object, { physics: binding }), rest: REST_POSE, physics: { step } };
+}
+
+function babylonTransformPortSubject(): TransformPortContractSubject {
+  const node = new FakeNode({
+    position: REST_POSE.position,
+    rotationQuaternion: REST_POSE.quaternion,
+    physics: true,
+  });
+  return {
+    port: new BabylonTransformPort(node, { physicsMotionTypes: PHYSICS_MOTION_TYPES }),
+    rest: REST_POSE,
+    physics: { step: (dt) => node.physicsBody!.step(dt) },
+  };
 }
 
 const transformPortPlatforms: Array<[string, () => TransformPortContractSubject]> = [
   ["threejs", () => ({ port: new ThreeTransformPort(objectAtRest()), rest: REST_POSE })],
-  [
-    "babylon",
-    () => ({
-      port: new BabylonTransformPort(
-        new FakeNode({ position: REST_POSE.position, rotationQuaternion: REST_POSE.quaternion }),
-      ),
-      rest: REST_POSE,
-    }),
-  ],
-  ["iwsdk", () => ({ port: new IWSDKTransformPort(objectAtRest()), rest: REST_POSE })],
+  ["babylon", babylonTransformPortSubject],
+  ["iwsdk", iwsdkTransformPortSubject],
   ["xrblocks", () => ({ port: new XRBlocksTransformPort(objectAtRest()), rest: REST_POSE })],
-  ["native", () => ({ port: nativePortAtRest(), rest: REST_POSE })],
+  ["native", nativeTransformPortSubject],
 ];
 
 describe.each(transformPortPlatforms)("%s TransformPort", (_name, build) => {

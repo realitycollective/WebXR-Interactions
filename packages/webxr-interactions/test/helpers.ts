@@ -11,7 +11,12 @@ import {
   type RayTuple,
   type Vec3Tuple,
 } from "@realitycollective/webxr-input";
-import type { HitTester, InteractableHit, TransformPort } from "@realitycollective/webxr-interactions";
+import type {
+  HitTester,
+  HoldRelease,
+  InteractableHit,
+  TransformPort,
+} from "@realitycollective/webxr-interactions";
 
 export class FakeProvider implements InputProvider {
   capabilities: InputCapabilities = {
@@ -94,6 +99,10 @@ export class FakeTransform implements TransformPort {
   localRotation: QuatTuple = [0, 0, 0, 1];
   worldPose: PoseTuple | null = null;
   effect: { scale?: number; emissive?: number } | null = null;
+  /** Physics state, tracked for the held/released assertions in behaviours.test.ts. */
+  held = false;
+  holdStarts = 0;
+  releases: HoldRelease[] = [];
 
   /** The last pose written through setWorldPose, else the rest pose. */
   getWorldPose(): PoseTuple {
@@ -122,6 +131,16 @@ export class FakeTransform implements TransformPort {
 
   setEffect(effect: { scale?: number; emissive?: number }): void {
     this.effect = effect;
+  }
+
+  beginHold(): void {
+    this.held = true;
+    this.holdStarts += 1;
+  }
+
+  endHold(release: HoldRelease): void {
+    this.held = false;
+    this.releases.push(release);
   }
 }
 

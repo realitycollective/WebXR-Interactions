@@ -22,6 +22,7 @@ import type {
   Unsubscribe,
   Vec3Tuple,
 } from "@realitycollective/webxr-input";
+import type { HoldRelease } from "@realitycollective/webxr-interactions";
 import type { NativeHit, NativeInputHost, NativeInteractionHost } from "@realitycollective/native-interactions";
 
 export interface FakeInputHostCapable {
@@ -141,6 +142,8 @@ export class FakeInputHost implements NativeInputHost {
 export interface FakeInteractionHostCapable {
   setWorldPose?: boolean;
   setEffect?: boolean;
+  /** Wires beginHold/endHold and a fake gravity-driven `step()`, the same shape `TransformPortPhysicsDriver` expects. */
+  physics?: boolean;
 }
 
 export class FakeInteractionHost implements NativeInteractionHost {
@@ -152,25 +155,83 @@ export class FakeInteractionHost implements NativeInteractionHost {
   private readonly poses = new Map<string, PoseTuple>();
   private readonly restPoses = new Map<string, PoseTuple>();
   private readonly offsets = new Map<string, Vec3Tuple>();
+  private readonly physicsCapable: boolean;
+  private readonly heldTargets = new Set<string>();
+  private readonly velocities = new Map<string, Vec3Tuple>();
 
   readonly setLocalOffsetCalls: Array<[string, Vec3Tuple]> = [];
   readonly setLocalRotationCalls: Array<[string, QuatTuple]> = [];
   readonly setWorldPoseCalls: Array<[string, PoseTuple]> = [];
   readonly setEffectCalls: Array<[string, { scale?: number; emissive?: number }]> = [];
+  readonly beginHoldCalls: string[] = [];
+  readonly endHoldCalls: Array<[string, HoldRelease]> = [];
 
   setWorldPose?: (targetId: string, pose: PoseTuple) => void;
   setEffect?: (targetId: string, effect: { scale?: number; emissive?: number }) => void;
+  beginHold?: (targetId: string) => void;
+  endHold?: (targetId: string, release: HoldRelease) => void;
 
   constructor(capable: FakeInteractionHostCapable = {}) {
+    this.physicsCapable = !!capable.physics;
     if (capable.setWorldPose) {
       this.setWorldPose = (targetId, pose) => {
         this.setWorldPoseCalls.push([targetId, pose]);
+        this.writeLivePose(targetId, pose);
+        this.clearVelocityIfNotHeld(targetId);
       };
     }
     if (capable.setEffect) {
       this.setEffect = (targetId, effect) => {
         this.setEffectCalls.push([targetId, effect]);
       };
+    }
+    if (capable.physics) {
+      this.beginHold = (targetId) => {
+        this.beginHoldCalls.push(targetId);
+        this.heldTargets.add(targetId);
+      };
+      this.endHold = (targetId, release) => {
+        this.endHoldCalls.push([targetId, release]);
+        this.heldTargets.delete(targetId);
+        this.velocities.set(targetId, [...release.linearVelocity]);
+      };
+    }
+  }
+
+  /**
+   * Advance the fake physics for one target: gravity moves it unless it is
+   * currently held, mirroring the rule `beginHold`/`endHold` document. The
+   * `TransformPortPhysicsDriver` a contract-case subject wires to this.
+   */
+  step(targetId: string, dtSeconds: number): void {
+    if (this.heldTargets.has(targetId)) return;
+    const velocity = this.velocities.get(targetId) ?? [0, 0, 0];
+    const next: Vec3Tuple = [velocity[0], velocity[1] - 9.8 * dtSeconds, velocity[2]];
+    this.velocities.set(targetId, next);
+    const pose = this.getWorldPose(targetId);
+    this.writeLivePose(targetId, {
+      position: [
+        pose.position[0] + next[0] * dtSeconds,
+        pose.position[1] + next[1] * dtSeconds,
+        pose.position[2] + next[2] * dtSeconds,
+      ],
+      quaternion: pose.quaternion,
+    });
+  }
+
+  /**
+   * Where a live-pose write lands. Overridable so a subclass tracking poses
+   * its own way (`GeometricInteractionHost` in `iwsdk-interactions`'s
+   * `port-parity.test.ts`) still gets a working `step()`/`setWorldPose`.
+   */
+  protected writeLivePose(targetId: string, pose: PoseTuple): void {
+    this.poses.set(targetId, pose);
+  }
+
+  /** setWorldPose's reset half: a teleport while not held clears velocity. */
+  protected clearVelocityIfNotHeld(targetId: string): void {
+    if (this.physicsCapable && !this.heldTargets.has(targetId)) {
+      this.velocities.set(targetId, [0, 0, 0]);
     }
   }
 
