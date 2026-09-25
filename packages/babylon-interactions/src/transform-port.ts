@@ -17,6 +17,7 @@ import {
   vAdd,
   vApplyQuat,
   vSub,
+  type HoldRelease,
   type TransformPort,
 } from "@realitycollective/webxr-interactions";
 import {
@@ -28,6 +29,7 @@ import {
   writeVec3,
   type BabylonQuaternionLike,
   type BabylonTransformNodeLike,
+  type BabylonVector3Like,
 } from "./babylon-types.js";
 
 export interface BabylonTransformPortOptions {
@@ -43,6 +45,19 @@ export interface BabylonTransformPortOptions {
    * A node that already has one needs neither - it is mutated in place.
    */
   createQuaternion?: () => BabylonQuaternionLike;
+  /**
+   * The two `PhysicsMotionType` values `beginHold`/`endHold` switch a held
+   * node's `physicsBody` between - pass Babylon's own
+   * `{ animated: PhysicsMotionType.ANIMATED, dynamic: PhysicsMotionType.DYNAMIC }`.
+   * This package holds no Babylon values, only shapes, so the app supplies
+   * the actual enum members, the same idea as `createQuaternion`.
+   *
+   * `beginHold`/`endHold` exist on the port only when BOTH this option and
+   * `node.physicsBody` are present at construction - a node with no
+   * physics body, or a construction with no motion types, gets neither
+   * member and behaves exactly as before.
+   */
+  physicsMotionTypes?: { animated: unknown; dynamic: unknown };
 }
 
 export class BabylonTransformPort implements TransformPort {
@@ -51,11 +66,35 @@ export class BabylonTransformPort implements TransformPort {
   private restPosition: Vec3Tuple = [0, 0, 0];
   private restQuaternion: QuatTuple = [0, 0, 0, 1];
   private restScale: Vec3Tuple = [1, 1, 1];
+  private held = false;
+
+  readonly beginHold?: () => void;
+  readonly endHold?: (release: HoldRelease) => void;
 
   constructor(node: BabylonTransformNodeLike, options: BabylonTransformPortOptions = {}) {
     this.node = node;
     this.createQuaternion = options.createQuaternion ?? (() => ({ x: 0, y: 0, z: 0, w: 1 }));
     this.recaptureRest();
+
+    const body = node.physicsBody;
+    const motionTypes = options.physicsMotionTypes;
+    if (body && motionTypes) {
+      this.beginHold = () => {
+        this.held = true;
+        // Node-drives-physics: our setWorldPose writes below now stick,
+        // and gravity/collisions stop moving the node - see
+        // BabylonPhysicsBodyLike's own comment.
+        body.disablePreStep = true;
+        body.setMotionType(motionTypes.animated);
+      };
+      this.endHold = (release) => {
+        this.held = false;
+        body.setMotionType(motionTypes.dynamic);
+        body.disablePreStep = false;
+        body.setLinearVelocity(vector3Like(release.linearVelocity));
+        body.setAngularVelocity(vector3Like(release.angularVelocity));
+      };
+    }
   }
 
   /** Re-read the node's current local transform as the new rest. */
@@ -103,8 +142,11 @@ export class BabylonTransformPort implements TransformPort {
   }
 
   /**
-   * Follow a world pose while grabbed. With a parent, the pose is resolved
-   * into the parent's frame through its absolute position and rotation.
+   * Follow a world pose while grabbed, or place the node directly the rest
+   * of the time (reset / teleport) - see `TransformPort.setWorldPose`'s own
+   * comment for what the two mean on a node with physics. With a parent,
+   * the pose is resolved into the parent's frame through its absolute
+   * position and rotation.
    *
    * Simplification: parent SCALE is ignored. A grabbed object under a scaled
    * parent tracks the hand at the wrong distance. Grabbables are expected to
@@ -115,12 +157,22 @@ export class BabylonTransformPort implements TransformPort {
     if (!parent) {
       writeVec3(this.node.position, pose.position);
       this.writeRotation(pose.quaternion);
-      return;
+    } else {
+      const parentPose = nodeWorldPose(parent);
+      const inverse = quatConjugate(parentPose.quaternion);
+      writeVec3(this.node.position, vApplyQuat(vSub(pose.position, parentPose.position), inverse));
+      this.writeRotation(quatMultiply(inverse, pose.quaternion));
     }
-    const parentPose = nodeWorldPose(parent);
-    const inverse = quatConjugate(parentPose.quaternion);
-    writeVec3(this.node.position, vApplyQuat(vSub(pose.position, parentPose.position), inverse));
-    this.writeRotation(quatMultiply(inverse, pose.quaternion));
+    // Not held: a physics-enabled node teleports and comes to rest, rather
+    // than carrying whatever velocity it had a moment before ("back to the
+    // tee"). A DYNAMIC body already picks up a direct node write on its
+    // next pre-step (the same sync `beginHold`'s ANIMATED switch disables),
+    // so all a reset needs on top of the write above is clearing velocity.
+    const body = this.node.physicsBody;
+    if (body && !this.held) {
+      body.setLinearVelocity(ZERO_VECTOR3);
+      body.setAngularVelocity(ZERO_VECTOR3);
+    }
   }
 
   /**
@@ -150,3 +202,10 @@ export class BabylonTransformPort implements TransformPort {
     writeQuat(target, value);
   }
 }
+
+/** A fresh plain `{ x, y, z }` - `setLinearVelocity`/`setAngularVelocity` only ever read it. */
+function vector3Like(v: Vec3Tuple): BabylonVector3Like {
+  return { x: v[0], y: v[1], z: v[2] };
+}
+
+const ZERO_VECTOR3: BabylonVector3Like = { x: 0, y: 0, z: 0 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BabylonTransformPort } from "@realitycollective/babylon-interactions";
-import { BARE_PARENT, FakeNode, HALF_TURN_Y, quat } from "./helpers.js";
+import { BARE_PARENT, FakeNode, HALF_TURN_Y, PHYSICS_MOTION_TYPES, quat } from "./helpers.js";
 
 describe("BabylonTransformPort offsets", () => {
   it("reports nothing at rest and round-trips an offset", () => {
@@ -156,5 +156,52 @@ describe("BabylonTransformPort effects", () => {
 
     const bare = { position: { x: 0, y: 0, z: 0 }, getAbsolutePosition: () => ({ x: 0, y: 0, z: 0 }) };
     expect(() => new BabylonTransformPort(bare).setEffect({ scale: 2 })).not.toThrow();
+  });
+});
+
+describe("BabylonTransformPort held pose", () => {
+  it("omits beginHold/endHold on a node with no physicsBody, or with no physicsMotionTypes option", () => {
+    const node = new FakeNode({ position: [0, 1, 0] });
+    expect(new BabylonTransformPort(node).beginHold).toBeUndefined();
+
+    const physicalNode = new FakeNode({ position: [0, 1, 0], physics: true });
+    expect(new BabylonTransformPort(physicalNode).beginHold).toBeUndefined();
+  });
+
+  it("beginHold switches the body to ANIMATED and disables the pre-step sync", () => {
+    const node = new FakeNode({ position: [0, 1, 0], physics: true });
+    const port = new BabylonTransformPort(node, { physicsMotionTypes: PHYSICS_MOTION_TYPES });
+    port.beginHold?.();
+    expect(node.physicsBody?.motionType).toBe("ANIMATED");
+    expect(node.physicsBody?.disablePreStep).toBe(true);
+  });
+
+  it("endHold switches the body back to DYNAMIC, re-enables the sync, and applies the release velocity", () => {
+    const node = new FakeNode({ position: [0, 1, 0], physics: true });
+    const port = new BabylonTransformPort(node, { physicsMotionTypes: PHYSICS_MOTION_TYPES });
+    port.beginHold?.();
+    port.endHold?.({ linearVelocity: [1, 2, 3], angularVelocity: [0, 0.5, 0] });
+    expect(node.physicsBody?.motionType).toBe("DYNAMIC");
+    expect(node.physicsBody?.disablePreStep).toBe(false);
+    expect(node.physicsBody?.linearVelocity).toEqual([1, 2, 3]);
+    expect(node.physicsBody?.angularVelocity).toEqual([0, 0.5, 0]);
+  });
+
+  it("setWorldPose while not held clears the body's velocity (reset), and leaves it while held", () => {
+    const node = new FakeNode({ position: [0, 1, 0], physics: true });
+    const port = new BabylonTransformPort(node, { physicsMotionTypes: PHYSICS_MOTION_TYPES });
+    node.physicsBody!.linearVelocity = [5, 5, 5];
+
+    // Held: setWorldPose must not touch velocity - beginHold owns that.
+    port.beginHold?.();
+    port.setWorldPose({ position: [1, 1, 1], quaternion: [0, 0, 0, 1] });
+    expect(node.physicsBody?.linearVelocity).toEqual([5, 5, 5]);
+
+    // Released, then reset: the teleport clears velocity.
+    port.endHold?.({ linearVelocity: [9, 9, 9], angularVelocity: [0, 0, 0] });
+    port.setWorldPose({ position: [2, 2, 2], quaternion: [0, 0, 0, 1] });
+    expect(node.physicsBody?.linearVelocity).toEqual([0, 0, 0]);
+    expect(node.physicsBody?.angularVelocity).toEqual([0, 0, 0]);
+    expect(node.position).toEqual({ x: 2, y: 2, z: 2 });
   });
 });

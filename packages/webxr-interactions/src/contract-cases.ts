@@ -20,7 +20,7 @@
  */
 import type { PoseTuple, QuatTuple, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import { quatMultiply, vAdd, vApplyQuat } from "./math.js";
-import type { HitTester, TransformPort } from "./ports.js";
+import type { HitTester, HoldRelease, TransformPort } from "./ports.js";
 
 // ---------------------------------------------------------------------------
 // HitTester
@@ -161,6 +161,16 @@ const HIT_TESTER_CASES: readonly HitTesterContractCase[] = [
 // TransformPort
 // ---------------------------------------------------------------------------
 
+/**
+ * Advances a subject's physics simulation - a real engine step where a
+ * platform's physics can run in a test, otherwise a fake that faithfully
+ * reproduces the one behaviour these cases check: gravity moves the object
+ * unless held, and a release velocity carries it.
+ */
+export interface TransformPortPhysicsDriver {
+  step(dtSeconds: number): void;
+}
+
 /** The port under test, over one object. Build a FRESH one per case. */
 export interface TransformPortContractSubject {
   port: TransformPort;
@@ -170,6 +180,12 @@ export interface TransformPortContractSubject {
    * so a port that ignores its rest frame cannot pass by accident.
    */
   rest: PoseTuple;
+  /**
+   * Present only when the object has a physics body - the same condition
+   * that gives the port `beginHold`/`endHold`. The held/released/reset
+   * cases below skip without one, since there is nothing for them to check.
+   */
+  physics?: TransformPortPhysicsDriver;
 }
 
 /** One check a {@link TransformPort} implementation must pass. */
@@ -190,6 +206,33 @@ const POSE_EPS = 1e-3;
 // A quarter turn about Y - a non-identity unit quaternion, so the case
 // cannot pass by accident on a port that ignores its argument.
 const QUARTER_TURN_Y: QuatTuple = [0, Math.SQRT1_2, 0, Math.SQRT1_2];
+
+// ---------------------------------------------------------------------------
+// Held / released / reset - the "held pose" rule, checked only when the
+// subject carries a physics driver. One fixed step size and a looser
+// position tolerance than POSE_EPS: real engines differ slightly in their
+// integrator, and a held/reset case allows for up to one step of gravity
+// (see PHYSICS_POSE_EPS's own comment), where the plain pose cases above
+// never touch physics at all.
+// ---------------------------------------------------------------------------
+
+const PHYSICS_DT = 1 / 60;
+const HELD_STEPS = 5;
+/** metres/second - small enough that one step's drift is easy to read, large enough not to vanish into PHYSICS_POSE_EPS. */
+const RELEASE_SPEED = 2;
+/** metres/second - about 25x RELEASE_SPEED, so "kept the old velocity" and "one step of gravity" cannot be confused. */
+const LARGE_PRIOR_SPEED = 50;
+/**
+ * 2 cm. One step of gravity at PHYSICS_DT droops roughly
+ * `0.5 * 9.8 * PHYSICS_DT^2` ≈ 1.4 mm, well inside this; a full step of
+ * LARGE_PRIOR_SPEED (≈ 0.83 m) or RELEASE_SPEED (≈ 33 mm) is well outside it.
+ */
+const PHYSICS_POSE_EPS = 0.02;
+
+function assertPhysicsPoseClose(value: PoseTuple, expected: PoseTuple, label: string): void {
+  assertVec3Close(value.position, expected.position, PHYSICS_POSE_EPS, `${label}.position`);
+  assertQuatClose(value.quaternion, expected.quaternion, `${label}.quaternion`);
+}
 
 const TRANSFORM_PORT_CASES: readonly TransformPortContractCase[] = [
   {
@@ -311,6 +354,65 @@ const TRANSFORM_PORT_CASES: readonly TransformPortContractCase[] = [
       } catch (error) {
         throw new Error(`setEffect({ scale, emissive }) must not throw, it threw: ${String(error)}`);
       }
+    },
+  },
+  {
+    name: "Held: beginHold holds a fixed setWorldPose without falling, when the subject has physics",
+    run({ port, rest, physics }) {
+      if (!physics || !port.setWorldPose || !port.beginHold) return;
+      const held: PoseTuple = {
+        position: [rest.position[0], rest.position[1] + 1, rest.position[2]],
+        quaternion: rest.quaternion,
+      };
+      port.beginHold();
+      for (let i = 0; i < HELD_STEPS; i++) {
+        port.setWorldPose(held);
+        physics.step(PHYSICS_DT);
+      }
+      // A tight tolerance, not PHYSICS_POSE_EPS: a genuinely held body sees
+      // no simulation at all, so it matches the written pose exactly bar
+      // floating point noise - the same POSE_EPS the non-physics cases
+      // above use. One step of unwanted gravity (~2.7 mm at PHYSICS_DT) is
+      // what this case exists to catch, and it must not hide inside the
+      // tolerance the way it deliberately may in the Reset case below.
+      assertPoseClose(port.getWorldPose(), held, `getWorldPose() after ${HELD_STEPS} held steps`);
+    },
+  },
+  {
+    name: "Released: endHold sends the body away with the release velocity, when the subject has physics",
+    run({ port, rest, physics }) {
+      if (!physics || !port.beginHold || !port.endHold) return;
+      port.beginHold();
+      const release: HoldRelease = { linearVelocity: [RELEASE_SPEED, 0, 0], angularVelocity: [0, 0, 0] };
+      port.endHold(release);
+      physics.step(PHYSICS_DT);
+      const moved = port.getWorldPose().position[0] - rest.position[0];
+      assert(
+        moved > RELEASE_SPEED * PHYSICS_DT * 0.5,
+        `endHold({ linearVelocity: [${RELEASE_SPEED}, 0, 0] }) must move the body that way within one step, moved ${moved}`,
+      );
+    },
+  },
+  {
+    name: "Reset: setWorldPose while not held teleports to the pose and clears velocity, when the subject has physics",
+    run({ port, rest, physics }) {
+      if (!physics || !port.setWorldPose || !port.beginHold || !port.endHold) return;
+      // Give the body a large prior velocity and let it run for a step, so
+      // carrying that velocity through the reset below is unmistakable -
+      // one step of it (~0.83 m) dwarfs PHYSICS_POSE_EPS (2 cm).
+      port.beginHold();
+      const priorRelease: HoldRelease = { linearVelocity: [LARGE_PRIOR_SPEED, 0, 0], angularVelocity: [0, 0, 0] };
+      port.endHold(priorRelease);
+      physics.step(PHYSICS_DT);
+      const target: PoseTuple = {
+        position: [rest.position[0] - 1, rest.position[1] + 2, rest.position[2] + 0.5],
+        quaternion: rest.quaternion,
+      };
+      port.setWorldPose(target);
+      // One further step: it must be at `target`, not carrying the prior
+      // velocity forward - allowing for this one step's worth of gravity.
+      physics.step(PHYSICS_DT);
+      assertPhysicsPoseClose(port.getWorldPose(), target, "getWorldPose() one step after a reset setWorldPose");
     },
   },
 ];

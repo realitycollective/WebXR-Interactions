@@ -19,7 +19,31 @@ import {
   type Object3D,
 } from "three";
 import type { PoseTuple, QuatTuple, Vec3Tuple } from "@realitycollective/webxr-input";
-import type { TransformPort } from "@realitycollective/webxr-interactions";
+import type { HoldRelease, TransformPort } from "@realitycollective/webxr-interactions";
+
+/**
+ * What drives `beginHold`/`endHold`/the held-vs-reset split of `setWorldPose`
+ * on an entity with physics - built by `IWSDKInteractions.register` (which
+ * has the `Entity`/`World` this port itself never touches) from
+ * `@iwsdk/core`'s `PhysicsBody`/`PhysicsShape`/`PhysicsManipulation`
+ * components and `PhysicsSystem.setBodyTransform`, documented next to that
+ * code. Kept as a small seam here rather than importing `@iwsdk/core` into
+ * this file, the same reason `NativeTransformPort` forwards to a host slice
+ * instead of holding ECS details itself.
+ */
+export interface IWSDKPhysicsBinding {
+  /** Suspend physics: `setWorldPose` writes the object3D directly until `endHold`. */
+  beginHold(): void;
+  /** Resume physics with `release` as the body's new velocity. */
+  endHold(release: HoldRelease): void;
+  /** Place the object while NOT held: teleport it, with velocities cleared. */
+  teleport(pose: PoseTuple): void;
+}
+
+export interface IWSDKTransformPortOptions {
+  /** Present only when the entity has a physics body - see {@link IWSDKPhysicsBinding}. */
+  physics?: IWSDKPhysicsBinding;
+}
 
 export class IWSDKTransformPort implements TransformPort {
   private readonly object: Object3D;
@@ -27,15 +51,32 @@ export class IWSDKTransformPort implements TransformPort {
   private readonly restQuaternion = new Quaternion();
   private readonly restScale = new Vector3();
   private baseEmissive: number | null = null;
+  private readonly physics: IWSDKPhysicsBinding | undefined;
+  private held = false;
 
   private readonly v = new Vector3();
   private readonly q = new Quaternion();
   private readonly q2 = new Quaternion();
   private readonly m = new Matrix4();
 
-  constructor(object: Object3D) {
+  readonly beginHold?: () => void;
+  readonly endHold?: (release: HoldRelease) => void;
+
+  constructor(object: Object3D, options: IWSDKTransformPortOptions = {}) {
     this.object = object;
+    this.physics = options.physics;
     this.recaptureRest();
+    if (this.physics) {
+      const physics = this.physics;
+      this.beginHold = () => {
+        this.held = true;
+        physics.beginHold();
+      };
+      this.endHold = (release) => {
+        this.held = false;
+        physics.endHold(release);
+      };
+    }
   }
 
   recaptureRest(): void {
@@ -87,7 +128,19 @@ export class IWSDKTransformPort implements TransformPort {
     this.object.quaternion.copy(this.restQuaternion).multiply(this.q);
   }
 
+  /**
+   * Follow a world pose while grabbed, or place the object directly the
+   * rest of the time (reset / teleport) - see `TransformPort.setWorldPose`.
+   * On an entity with physics, NOT held delegates entirely to
+   * {@link IWSDKPhysicsBinding.teleport}, which also mirrors the pose onto
+   * this object3D (see that binding's own doc) - writing it again here
+   * would just be the same write twice.
+   */
   setWorldPose(pose: PoseTuple): void {
+    if (this.physics && !this.held) {
+      this.physics.teleport(pose);
+      return;
+    }
     const parent = this.object.parent;
     this.v.set(pose.position[0], pose.position[1], pose.position[2]);
     this.q.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3]);

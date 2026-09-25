@@ -10,6 +10,7 @@ import type {
   BabylonHandTrackingLike,
   BabylonMotionControllerComponentLike,
   BabylonMotionControllerLike,
+  BabylonPhysicsBodyLike,
   BabylonPickingInfoLike,
   BabylonPointerInfoLike,
   BabylonQuaternionLike,
@@ -35,6 +36,53 @@ export function quat(value: Quat): BabylonQuaternionLike {
 
 /** 180 degrees about Y - turns Babylon's +Z forward into -Z. */
 export const HALF_TURN_Y: Quat = [0, 1, 0, 0];
+
+/**
+ * A fake Physics V2 body: a structural stand-in for `PhysicsBody`, since
+ * this package has no `@babylonjs/core`/`@babylonjs/havok` dependency to
+ * test against for real (see `babylon-types.ts`'s own comment on that).
+ * `step()` is a faithful-enough gravity simulation for the held/released/
+ * reset contract cases: gravity moves the node while `DYNAMIC`, not while
+ * `ANIMATED` (held) or `STATIC`, the same rule the real motion types name.
+ */
+export const PHYSICS_MOTION_TYPES = { animated: "ANIMATED", dynamic: "DYNAMIC" } as const;
+export type FakeMotionType = (typeof PHYSICS_MOTION_TYPES)[keyof typeof PHYSICS_MOTION_TYPES];
+
+export class FakePhysicsBody implements BabylonPhysicsBodyLike {
+  disablePreStep = false;
+  motionType: FakeMotionType = PHYSICS_MOTION_TYPES.dynamic;
+  linearVelocity: Vec3 = [0, 0, 0];
+  angularVelocity: Vec3 = [0, 0, 0];
+  readonly motionTypeWrites: FakeMotionType[] = [];
+
+  constructor(private readonly node: { position: BabylonVector3Like }) {}
+
+  setMotionType(motionType: unknown): void {
+    this.motionType = motionType as FakeMotionType;
+    this.motionTypeWrites.push(this.motionType);
+  }
+
+  setLinearVelocity(velocity: BabylonVector3Like): void {
+    this.linearVelocity = [velocity.x, velocity.y, velocity.z];
+  }
+
+  setAngularVelocity(velocity: BabylonVector3Like): void {
+    this.angularVelocity = [velocity.x, velocity.y, velocity.z];
+  }
+
+  /** Gravity, for one step, skipped unless the body is DYNAMIC. */
+  step(dtSeconds: number): void {
+    if (this.motionType !== PHYSICS_MOTION_TYPES.dynamic) return;
+    this.linearVelocity = [
+      this.linearVelocity[0],
+      this.linearVelocity[1] - 9.8 * dtSeconds,
+      this.linearVelocity[2],
+    ];
+    this.node.position.x += this.linearVelocity[0] * dtSeconds;
+    this.node.position.y += this.linearVelocity[1] * dtSeconds;
+    this.node.position.z += this.linearVelocity[2] * dtSeconds;
+  }
+}
 
 export class FakeObservable<T> {
   private readonly observers = new Set<(value: T) => void>();
@@ -68,6 +116,8 @@ export interface FakeNodeOptions {
   parent?: unknown;
   isVisible?: boolean;
   enabled?: boolean;
+  /** Attaches a {@link FakePhysicsBody}, reachable as `node.physicsBody`. */
+  physics?: boolean;
 }
 
 export class FakeNode implements BabylonTransformNodeLike {
@@ -79,6 +129,7 @@ export class FakeNode implements BabylonTransformNodeLike {
   enabled: boolean;
   computeWorldMatrixCalls = 0;
   readonly enabledWrites: boolean[] = [];
+  readonly physicsBody?: FakePhysicsBody;
   private readonly absolutePosition: BabylonVector3Like | null;
   private readonly absoluteRotation: BabylonQuaternionLike | null;
 
@@ -96,6 +147,7 @@ export class FakeNode implements BabylonTransformNodeLike {
     this.enabled = options.enabled ?? true;
     this.absolutePosition = options.absolutePosition ? v3(options.absolutePosition) : null;
     this.absoluteRotation = options.absoluteRotation ? quat(options.absoluteRotation) : null;
+    if (options.physics) this.physicsBody = new FakePhysicsBody(this);
   }
 
   get absoluteRotationQuaternion(): BabylonQuaternionLike {

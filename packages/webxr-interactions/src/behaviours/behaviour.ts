@@ -33,6 +33,15 @@ export interface InteractorInfo {
   ray?: RayTuple;
   gripPose?: PoseTuple;
   indexTip?: Vec3Tuple;
+  /**
+   * Grip velocity, present on the same terms as `InputSourceSnapshot`'s -
+   * the runtime's `VelocityTracker` fills it when the provider does not.
+   * `onGrabEnd`'s release throw reads these; absent on a synthesized
+   * release (source lost, target unregistered, runtime disposed), which
+   * behaves as zero.
+   */
+  linearVelocity?: Vec3Tuple;
+  angularVelocity?: Vec3Tuple;
   select: number;
   squeeze: number;
 }

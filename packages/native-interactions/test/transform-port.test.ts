@@ -60,6 +60,29 @@ describe("NativeTransformPort", () => {
     expect(port.setEffect).toBeUndefined();
   });
 
+  it("omits beginHold and endHold when the host does not carry them", () => {
+    const host = new FakeInteractionHost();
+    const port = new NativeTransformPort("plain", { interactions: host });
+    expect(port.beginHold).toBeUndefined();
+    expect(port.endHold).toBeUndefined();
+  });
+
+  it("forwards beginHold and endHold, keyed by target id, and copies the release velocity", () => {
+    const host = new FakeInteractionHost({ physics: true });
+    const port = new NativeTransformPort("prop", { interactions: host });
+
+    port.beginHold?.();
+    expect(host.beginHoldCalls).toEqual(["prop"]);
+
+    const release = { linearVelocity: [1, 2, 3] as [number, number, number], angularVelocity: [0, 1, 0] as [number, number, number] };
+    port.endHold?.(release);
+    expect(host.endHoldCalls).toEqual([["prop", { linearVelocity: [1, 2, 3], angularVelocity: [0, 1, 0] }]]);
+
+    // Copied, not kept: reusing the caller's tuple afterwards must not reach the host.
+    release.linearVelocity[0] = 99;
+    expect(host.endHoldCalls[0]?.[1].linearVelocity).toEqual([1, 2, 3]);
+  });
+
   it("forwards setEffect when the host carries it", () => {
     const host = new FakeInteractionHost({ setEffect: true });
     const port = new NativeTransformPort("pulse-target", { interactions: host });

@@ -10,6 +10,14 @@
  *   layer).
  * - `"native"` - the engine owns carry/throw (e.g. IWSDK grabbables +
  *   physics); the behaviour only mirrors transitions into core events.
+ *
+ * On a `poseOnly` host whose object has physics, "the behaviour owns the
+ * carry" also means the behaviour owns suspending and resuming it:
+ * `onGrabStart` calls `ctx.transform.beginHold()` so the follow above does
+ * not fight the solver, and `onGrabEnd` calls `endHold()` with the
+ * grabbing source's release velocity so a throw carries through. Both are
+ * optional on `TransformPort` and simply do not exist on a host with no
+ * physics, so this costs a host without one nothing.
  */
 import type { PoseTuple } from "@realitycollective/webxr-input";
 import { quatConjugate, quatMultiply, vAdd, vApplyQuat, vSub } from "../math.js";
@@ -43,12 +51,15 @@ export class GrabBehaviour implements Behaviour {
 
   onGrabStart(ctx: BehaviourContext, interactor: InteractorInfo): void {
     this.held = true;
-    if (this.fulfilment === "poseOnly" && interactor.gripPose && ctx.transform) {
-      const object = ctx.transform.getWorldPose();
-      const grip = interactor.gripPose;
-      const invGrip = quatConjugate(grip.quaternion);
-      this.offsetPosition = vApplyQuat(vSub(object.position, grip.position), invGrip);
-      this.offsetQuaternion = quatMultiply(invGrip, object.quaternion);
+    if (this.fulfilment === "poseOnly") {
+      ctx.transform?.beginHold?.();
+      if (interactor.gripPose && ctx.transform) {
+        const object = ctx.transform.getWorldPose();
+        const grip = interactor.gripPose;
+        const invGrip = quatConjugate(grip.quaternion);
+        this.offsetPosition = vApplyQuat(vSub(object.position, grip.position), invGrip);
+        this.offsetQuaternion = quatMultiply(invGrip, object.quaternion);
+      }
     }
     ctx.emit({ type: "grabStart", behaviourKind: this.kind, interactorId: interactor.id });
     ctx.feedback({
@@ -62,6 +73,16 @@ export class GrabBehaviour implements Behaviour {
 
   onGrabEnd(ctx: BehaviourContext, interactor: InteractorInfo): void {
     this.held = false;
+    if (this.fulfilment === "poseOnly") {
+      // Zero on a synthesized release (source lost, target unregistered,
+      // runtime disposed) - see the file comment and `InteractorInfo`'s.
+      // The object then resumes at rest rather than flying off on a
+      // disconnect it had nothing to do with.
+      ctx.transform?.endHold?.({
+        linearVelocity: interactor.linearVelocity ?? [0, 0, 0],
+        angularVelocity: interactor.angularVelocity ?? [0, 0, 0],
+      });
+    }
     ctx.emit({ type: "grabEnd", behaviourKind: this.kind, interactorId: interactor.id });
     ctx.feedback({
       cue: "drop",

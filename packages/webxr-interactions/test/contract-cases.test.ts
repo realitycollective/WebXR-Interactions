@@ -15,6 +15,7 @@ import {
   transformPortContractCases,
   type HitTester,
   type HitTesterContractSubject,
+  type HoldRelease,
   type InteractableHit,
   type PoseTuple,
   type QuatTuple,
@@ -224,6 +225,9 @@ const LIVE_WORLD = "setWorldPose, when present, is what getWorldPose reads back"
 const FRESH = "every returned tuple is a fresh value the caller owns";
 const NOT_KEPT = "a tuple passed in is not kept";
 const EFFECT = "setEffect, when present, accepts scale and emissive without throwing";
+const HELD = "Held: beginHold holds a fixed setWorldPose without falling, when the subject has physics";
+const RELEASED = "Released: endHold sends the body away with the release velocity, when the subject has physics";
+const RESET = "Reset: setWorldPose while not held teleports to the pose and clears velocity, when the subject has physics";
 
 /** A rest pose away from the origin and turned a quarter about Y. */
 const REST_POSE: PoseTuple = { position: [1, 0.5, -2], quaternion: [0, Math.SQRT1_2, 0, Math.SQRT1_2] };
@@ -262,25 +266,44 @@ interface TransformPortFakeConfig {
   hasSetEffect?: boolean;
   /** setEffect throws when called. */
   effectThrows?: boolean;
+  /** Whether this port carries beginHold/endHold and the subject a physics driver at all. */
+  hasPhysics?: boolean;
+  /** Gravity keeps acting on a held body, so it falls instead of staying put. */
+  heldFalls?: boolean;
+  /** endHold ignores the release velocity it was given. */
+  releaseDropsVelocity?: boolean;
+  /** setWorldPose while not held keeps the body's velocity instead of clearing it. */
+  resetKeepsVelocity?: boolean;
 }
 
 function copyPose(pose: PoseTuple): PoseTuple {
   return { position: [...pose.position], quaternion: [...pose.quaternion] };
 }
 
+/** Gravity used by the fake physics simulation below - plain -9.8 m/s² on Y. */
+const GRAVITY_Y = -9.8;
+
 /** A port over one object that sits at {@link REST_POSE} with no parent. */
 class FakeTransformPortHost implements TransformPort {
   private readonly rest = copyPose(REST_POSE);
   private live = copyPose(REST_POSE);
   private offset: Vec3Tuple = [0, 0, 0];
+  private velocity: Vec3Tuple = [0, 0, 0];
+  private held = false;
   readonly setWorldPose?: (pose: PoseTuple) => void;
   readonly setEffect?: (effect: { scale?: number; emissive?: number }) => void;
+  readonly beginHold?: () => void;
+  readonly endHold?: (release: HoldRelease) => void;
 
   constructor(private readonly config: TransformPortFakeConfig = {}) {
     if (config.hasSetWorldPose) {
       this.setWorldPose = (pose) => {
         if (this.config.worldPoseIgnored) return;
         this.live = this.config.keepsPoseInput ? pose : copyPose(pose);
+        // Real "reset" behaviour: teleporting while not held clears velocity.
+        if (this.config.hasPhysics && !this.held && !this.config.resetKeepsVelocity) {
+          this.velocity = [0, 0, 0];
+        }
       };
     }
     if (config.hasSetEffect) {
@@ -288,6 +311,26 @@ class FakeTransformPortHost implements TransformPort {
         if (this.config.effectThrows) throw new Error("effect rejected");
       };
     }
+    if (config.hasPhysics) {
+      this.beginHold = () => {
+        this.held = true;
+      };
+      this.endHold = (release) => {
+        this.held = false;
+        this.velocity = this.config.releaseDropsVelocity ? [0, 0, 0] : [...release.linearVelocity];
+      };
+    }
+  }
+
+  /** Advance the fake simulation: gravity + velocity integration, skipped while held. */
+  step(dtSeconds: number): void {
+    if (this.held && !this.config.heldFalls) return;
+    this.velocity = [this.velocity[0], this.velocity[1] + GRAVITY_Y * dtSeconds, this.velocity[2]];
+    this.live.position = [
+      this.live.position[0] + this.velocity[0] * dtSeconds,
+      this.live.position[1] + this.velocity[1] * dtSeconds,
+      this.live.position[2] + this.velocity[2] * dtSeconds,
+    ];
   }
 
   getWorldPose(): PoseTuple {
@@ -323,7 +366,12 @@ class FakeTransformPortHost implements TransformPort {
 }
 
 function makePortSubject(config: TransformPortFakeConfig = {}): TransformPortContractSubject {
-  return { port: new FakeTransformPortHost(config), rest: copyPose(REST_POSE) };
+  const host = new FakeTransformPortHost(config);
+  return {
+    port: host,
+    rest: copyPose(REST_POSE),
+    ...(config.hasPhysics ? { physics: { step: (dt: number) => host.step(dt) } } : {}),
+  };
 }
 
 function runTransformPortCase(name: string, config: TransformPortFakeConfig): void {
@@ -352,6 +400,14 @@ describe("transformPortContractCases", () => {
   it("passes a conforming port that also implements setWorldPose and setEffect", () => {
     for (const contractCase of transformPortContractCases()) {
       expect(() => contractCase.run(makePortSubject({ hasSetWorldPose: true, hasSetEffect: true }))).not.toThrow();
+    }
+  });
+
+  it("passes a conforming port that also implements physics-driven beginHold/endHold", () => {
+    for (const contractCase of transformPortContractCases()) {
+      expect(() =>
+        contractCase.run(makePortSubject({ hasSetWorldPose: true, hasPhysics: true })),
+      ).not.toThrow();
     }
   });
 });
@@ -443,6 +499,24 @@ describe("transformPortContractCases catches a broken port", () => {
     expect(() => runTransformPortCase(EFFECT, { hasSetEffect: true, effectThrows: true })).toThrow(
       /setEffect\(\{ scale, emissive \}\) must not throw/,
     );
+  });
+
+  it("rejects a held body that still falls under gravity", () => {
+    expect(() =>
+      runTransformPortCase(HELD, { hasSetWorldPose: true, hasPhysics: true, heldFalls: true }),
+    ).toThrow(/getWorldPose\(\) after \d+ held steps/);
+  });
+
+  it("rejects an endHold that drops the release velocity it was given", () => {
+    expect(() =>
+      runTransformPortCase(RELEASED, { hasPhysics: true, releaseDropsVelocity: true }),
+    ).toThrow(/must move the body that way within one step/);
+  });
+
+  it("rejects a reset setWorldPose that keeps the body's previous velocity", () => {
+    expect(() =>
+      runTransformPortCase(RESET, { hasSetWorldPose: true, hasPhysics: true, resetKeepsVelocity: true }),
+    ).toThrow(/getWorldPose\(\) one step after a reset setWorldPose/);
   });
 
   it("fails loudly when asked for a case that does not exist", () => {

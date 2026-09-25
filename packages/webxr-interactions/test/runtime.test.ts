@@ -321,3 +321,75 @@ describe("lifecycle", () => {
     expect(press?.isLatched).toBe(true);
   });
 });
+
+describe("grab suspends and resumes physics via beginHold/endHold", () => {
+  let transform: FakeTransform;
+
+  beforeEach(() => {
+    provider = new FakeProvider();
+    hitTester = new FakeHitTester();
+    runtime = new InteractionRuntime({ provider, hitTester });
+    transform = new FakeTransform();
+    runtime.registerInteractable({ id: "prop", behaviours: [{ kind: "grab" }] }, { transform });
+    hitTester.rayTarget = "prop";
+  });
+
+  it("calls beginHold on grab start and endHold with the tracked release velocity on a normal release", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.holdStarts).toBe(1);
+    expect(transform.held).toBe(true);
+
+    provider.sources = [
+      raySource("right", { squeeze: 0, linearVelocity: [1, 2, 3], angularVelocity: [0, 1, 0] }),
+    ];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [1, 2, 3], angularVelocity: [0, 1, 0] }]);
+  });
+
+  it("a source that vanishes mid-hold still ends the hold, with zero velocity", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    provider.sources = []; // the source stops reporting altogether
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("unregistering the held interactable ends the hold, with zero velocity", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    runtime.unregisterInteractable("prop");
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("disabling the held interactable ends the hold, with zero velocity", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    runtime.setInteractableEnabled("prop", false);
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("disposing the runtime ends every still-held hold, with zero velocity, so physics is never left suspended", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    runtime.dispose();
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+
+    // Idempotent: a second dispose must not call endHold again.
+    runtime.dispose();
+    expect(transform.releases).toHaveLength(1);
+  });
+});

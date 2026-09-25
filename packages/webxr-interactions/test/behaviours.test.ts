@@ -159,7 +159,43 @@ describe("GrabBehaviour (poseOnly)", () => {
     expect(grab.getValue()).toBe(0);
   });
 
-  it("native fulfilment never writes the transform", () => {
+  it("suspends physics on grab start and resumes it with the source's release velocity on grab end", () => {
+    const grab = new GrabBehaviour({}, "poseOnly");
+    const t = new FakeTransform();
+    const { context } = ctx(t);
+    const holder: InteractorInfo = {
+      ...interactor,
+      gripPose: { position: [0, 1, -0.4], quaternion: [0, 0, 0, 1] },
+    };
+    grab.onGrabStart(context, holder);
+    expect(t.holdStarts).toBe(1);
+    expect(t.held).toBe(true);
+    const released: InteractorInfo = {
+      ...holder,
+      linearVelocity: [1, 2, 3],
+      angularVelocity: [0, 0.5, 0],
+    };
+    grab.onGrabEnd(context, released);
+    expect(t.held).toBe(false);
+    expect(t.releases).toEqual([{ linearVelocity: [1, 2, 3], angularVelocity: [0, 0.5, 0] }]);
+  });
+
+  it("releases with zero velocity when the interactor carries none - a synthesized release", () => {
+    const grab = new GrabBehaviour({}, "poseOnly");
+    const t = new FakeTransform();
+    const { context } = ctx(t);
+    const holder: InteractorInfo = {
+      ...interactor,
+      gripPose: { position: [0, 1, -0.4], quaternion: [0, 0, 0, 1] },
+    };
+    grab.onGrabStart(context, holder);
+    // A synthesized release (source lost / target unregistered / runtime
+    // disposed) hands the behaviour an InteractorInfo with no velocity.
+    grab.onGrabEnd(context, { id: holder.id, kind: "other", select: 0, squeeze: 0 });
+    expect(t.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("native fulfilment never writes the transform, and never suspends or resumes physics", () => {
     const grab = new GrabBehaviour({}, "native");
     const t = new FakeTransform();
     const { context } = ctx(t);
@@ -170,6 +206,9 @@ describe("GrabBehaviour (poseOnly)", () => {
     grab.onGrabStart(context, holder);
     grab.update(context, holder);
     expect(t.worldPose).toBeNull();
+    expect(t.holdStarts).toBe(0);
+    grab.onGrabEnd(context, holder);
+    expect(t.releases).toHaveLength(0);
   });
 });
 
