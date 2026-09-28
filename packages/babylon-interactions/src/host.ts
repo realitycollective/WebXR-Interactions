@@ -15,13 +15,17 @@ import {
   InteractionRuntime,
   type DwellConfig,
   type InteractableDescriptor,
+  type PhysicsBodySpec,
+  type PhysicsFacility,
+  type PhysicsShapeSpec,
 } from "@realitycollective/webxr-interactions";
-import type { BabylonTransformNodeLike } from "./babylon-types.js";
+import { nodeWorldPose, type BabylonPhysicsKitLike, type BabylonTransformNodeLike } from "./babylon-types.js";
 import {
   BabylonHitTester,
   type BabylonHitTesterOptions,
   type BabylonPickWithRay,
 } from "./hit-tester.js";
+import { BabylonPhysicsFacility } from "./physics-facility.js";
 import { BabylonTransformPort, type BabylonTransformPortOptions } from "./transform-port.js";
 import { BabylonInputProvider, type BabylonProviderOptions } from "./provider.js";
 
@@ -35,11 +39,34 @@ export interface BabylonInteractionsOptions
    * `update` from its own loop.
    */
   attachToScene?: boolean;
+  /**
+   * The platform's physics. Havok (Physics V2) is the named default engine
+   * for Babylon: pass `{ kit }`, the Havok-era values from
+   * `BabylonPhysicsKitLike`, and the binding builds a `BabylonPhysicsFacility`
+   * over `options.scene`. Pass any `PhysicsFacility` instead to replace the
+   * default engine with your own. Omit it and no node can carry a body:
+   * `register` with a `body` or `shape` then throws.
+   */
+  physics?: PhysicsFacility | { kit: BabylonPhysicsKitLike };
+  /**
+   * Step the facility from `update(dt)`. Default true. Pass false when the
+   * app steps its physics world itself - or lets Babylon's own render loop
+   * do it, since Babylon normally steps physics from `scene.render()`.
+   */
+  stepPhysics?: boolean;
 }
 
 export interface BabylonRegisterOptions extends BabylonTransformPortOptions {
   /** Targeting radius for the sphere hit-tester. Default 0.1 m. */
   targetRadius?: number;
+  /**
+   * Give the node a physics body with these settings (defaults are the
+   * core's: dynamic, no damping, gravity factor 1). Needs `physics` on the
+   * setup. With a body, the port applies the held-pose rule through it.
+   */
+  body?: PhysicsBodySpec;
+  /** The body's collider (default `"auto"`: the node's own geometry). Implies `body`. */
+  shape?: PhysicsShapeSpec;
 }
 
 /** Longest frame the scene-attached loop will report, in seconds. */
@@ -49,7 +76,11 @@ export class BabylonInteractions {
   readonly runtime: InteractionRuntime;
   readonly provider: BabylonInputProvider;
   readonly hitTester: BabylonHitTester;
+  /** The platform's physics, when the setup was given one. */
+  readonly physics: PhysicsFacility | null;
+  private readonly stepPhysics: boolean;
   private readonly ports = new Map<string, BabylonTransformPort>();
+  private readonly nodes = new Map<string, BabylonTransformNodeLike>();
   private detachScene: (() => void) | null = null;
 
   constructor(options: BabylonInteractionsOptions) {
@@ -60,6 +91,12 @@ export class BabylonInteractions {
       hitTester: this.hitTester,
       ...(options.dwellDefaults ? { dwellDefaults: options.dwellDefaults } : {}),
     });
+    this.physics = options.physics
+      ? "kit" in options.physics
+        ? new BabylonPhysicsFacility(options.scene, options.physics.kit, { nodeFor: (id) => this.nodes.get(id) })
+        : options.physics
+      : null;
+    this.stepPhysics = options.stepPhysics ?? true;
     if (options.attachToScene) this.attachToScene(options);
   }
 
@@ -68,16 +105,36 @@ export class BabylonInteractions {
     this.hitTester.setPickWithRay(pick);
   }
 
-  /** Register an interactable with its Babylon node. */
+  /**
+   * Register an interactable with its Babylon node. With `body` or `shape`
+   * the node gets a physics body in the facility at its current world pose,
+   * and its port drives the held-pose rule through it.
+   */
   register(
     descriptor: InteractableDescriptor,
     node: BabylonTransformNodeLike,
     options: BabylonRegisterOptions = {},
   ): BabylonTransformPort {
-    const port = new BabylonTransformPort(
-      node,
-      options.createQuaternion ? { createQuaternion: options.createQuaternion } : {},
-    );
+    this.nodes.set(descriptor.id, node);
+    let port: BabylonTransformPort;
+    if (options.body || options.shape) {
+      if (!this.physics) {
+        throw new Error(
+          `[babylon-interactions] "${descriptor.id}" asks for a physics body but the setup has no physics; pass { kit } (the default engine) or a PhysicsFacility to createBabylonInteractions`,
+        );
+      }
+      node.computeWorldMatrix?.(true);
+      this.physics.addBody(descriptor.id, nodeWorldPose(node), options.body, options.shape);
+      port = new BabylonTransformPort(node, {
+        ...(options.createQuaternion ? { createQuaternion: options.createQuaternion } : {}),
+        physics: { facility: this.physics, bodyId: descriptor.id },
+      });
+    } else {
+      port = new BabylonTransformPort(
+        node,
+        options.createQuaternion ? { createQuaternion: options.createQuaternion } : {},
+      );
+    }
     this.ports.set(descriptor.id, port);
     this.hitTester.register(descriptor.id, node, options.targetRadius);
     this.runtime.registerInteractable(descriptor, { transform: port });
@@ -88,6 +145,8 @@ export class BabylonInteractions {
     this.runtime.unregisterInteractable(id);
     this.hitTester.unregister(id);
     this.ports.delete(id);
+    this.nodes.delete(id);
+    this.physics?.removeBody(id);
   }
 
   getPort(id: string): BabylonTransformPort | undefined {
@@ -98,6 +157,7 @@ export class BabylonInteractions {
     // The provider's eye-gaze filter and grace integrate over the same step.
     this.provider.setFrameDelta(dt);
     this.runtime.update(dt);
+    if (this.stepPhysics) this.physics?.step(dt);
   }
 
   dispose(): void {
@@ -105,6 +165,7 @@ export class BabylonInteractions {
     this.detachScene = null;
     this.runtime.dispose();
     this.provider.dispose();
+    this.physics?.dispose();
   }
 
   private attachToScene(options: BabylonInteractionsOptions): void {

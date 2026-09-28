@@ -95,6 +95,8 @@ export class FakeHitTester implements HitTester {
   proximityDistance = 0.01;
   /** The radius of the last proximity query, so a test can see what the runtime asked for. */
   lastProximityRadius: number | null = null;
+  /** Every proximity query radius of the last update, in order (touch, then grab), reset each `hitRay`-free frame by the test. */
+  proximityRadii: number[] = [];
 
   hitRay(_ray: RayTuple): InteractableHit | null {
     return this.rayTarget
@@ -104,6 +106,7 @@ export class FakeHitTester implements HitTester {
 
   hitProximity(_point: Vec3Tuple, radius: number): InteractableHit | null {
     this.lastProximityRadius = radius;
+    this.proximityRadii.push(radius);
     return this.proximityTarget && this.proximityDistance <= radius
       ? { interactableId: this.proximityTarget, distance: this.proximityDistance, point: [0, 0, 0] }
       : null;

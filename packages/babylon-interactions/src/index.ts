@@ -14,4 +14,5 @@ export * from "./babylon-types.js";
 export * from "./provider.js";
 export * from "./hit-tester.js";
 export * from "./transform-port.js";
+export * from "./physics-facility.js";
 export * from "./host.js";

@@ -7,10 +7,11 @@ import { describe, expect, it } from "vitest";
 import { nativeInteractionsHostConformanceCases } from "@realitycollective/native-interactions";
 import type { NativeHit } from "@realitycollective/native-interactions";
 import type { Vec3Tuple } from "@realitycollective/webxr-input";
+import { MemoryPhysicsFacility, type HoldRelease, type PhysicsBodySpec, type PhysicsShapeSpec, type PoseTuple } from "@realitycollective/webxr-interactions";
 import { FakeInputHost, ReferenceInteractionHost } from "./helpers.js";
 
 function reference() {
-  const input = new FakeInputHost({ presence: true, headPose: true });
+  const input = new FakeInputHost({ presence: true, headPose: true, pointerVisuals: true });
   input.sources = [
     { id: "left-controller", kind: "controller", handedness: "left", select: 0, squeeze: 0 },
     { id: "right-controller", kind: "controller", handedness: "right", select: 0, squeeze: 0 },
@@ -18,7 +19,35 @@ function reference() {
   input.cursorPoints = [[0, 1, -1]];
   input.enterSession();
   const interactions = new ReferenceInteractionHost(input);
-  return { input, interactions, testHost: interactions };
+  return { input, interactions, testHost: interactions, physics: new MemoryPhysicsFacility() };
+}
+
+/** A physics slice that is wrong in one chosen way. */
+class DefectivePhysics extends MemoryPhysicsFacility {
+  constructor(private readonly defect: "addIgnored" | "suspendIgnored" | "resumeIgnored" | "dropsVelocity" | "removeIgnored" | "noGravity") {
+    super();
+    if (defect === "noGravity") super.setGravity([0, 0, 0]);
+  }
+
+  override addBody(id: string, pose: PoseTuple, body?: PhysicsBodySpec, shape?: PhysicsShapeSpec): void {
+    if (this.defect === "addIgnored") return;
+    super.addBody(id, pose, body, shape);
+  }
+
+  override suspend(id: string): void {
+    if (this.defect === "suspendIgnored") return;
+    super.suspend(id);
+  }
+
+  override resume(id: string, release: HoldRelease): void {
+    if (this.defect === "resumeIgnored") return;
+    super.resume(id, this.defect === "dropsVelocity" ? { linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] } : release);
+  }
+
+  override removeBody(id: string): void {
+    if (this.defect === "removeIgnored") return;
+    super.removeBody(id);
+  }
 }
 
 /** A host that measures proximity to the centre: the September 2026 defect. */
@@ -39,7 +68,7 @@ describe("native Interactions host conformance kit, against the reference host",
   const cases = nativeInteractionsHostConformanceCases();
 
   it("names every case after its family and row, and carries the whole core hit-tester suite", () => {
-    for (const hostCase of cases) expect(hostCase.name).toMatch(/^(interactions|input)\//);
+    for (const hostCase of cases) expect(hostCase.name).toMatch(/^(interactions|input|physics)\//);
     expect(cases.some((c) => c.name.includes("SURFACE"))).toBe(true);
   });
 
@@ -52,6 +81,13 @@ describe("native Interactions host conformance kit, against the reference host",
     const broken = new CentreDistanceHost(setup.input);
     const surface = cases.find((c) => c.name.includes("SURFACE"))!;
     await expect(surface.run({ ...setup, interactions: broken, testHost: broken })).rejects.toThrow(/got 0\.13/);
+  });
+
+  it("fails the near-pointer cases too on a host that measures proximity to the centre", async () => {
+    const setup = reference();
+    const broken = new CentreDistanceHost(setup.input);
+    const touch = cases.find((c) => c.name.includes("presses at 0.02 m"))!;
+    await expect(touch.run({ ...setup, interactions: broken, testHost: broken })).rejects.toThrow(/\[interactions\//);
   });
 
   it("fails a host that ignores the radius it is handed", async () => {
@@ -67,6 +103,79 @@ describe("native Interactions host conformance kit, against the reference host",
     input.enterSession();
     const presence = cases.find((c) => c.name.includes("models only"))!;
     await expect(presence.run({ ...setup, input })).rejects.toThrow(/no applyPresence/);
+  });
+
+  it("fails a host that cannot be told what to draw for a pointer", async () => {
+    const setup = reference();
+    const input = new FakeInputHost({ presence: true });
+    input.enterSession();
+    const interactions = new ReferenceInteractionHost(input);
+    const visuals = cases.find((c) => c.name.includes("exactly as told"))!;
+    await expect(visuals.run({ input, interactions, testHost: interactions })).rejects.toThrow(/no applyPointerVisuals/);
+    const noReadback = { ...setup, testHost: { ...setup.testHost, pointerVisuals: undefined } as unknown as typeof setup.testHost };
+    await expect(visuals.run(noReadback)).rejects.toThrow(/no pointerVisuals readback/);
+  });
+
+  it("fails a host that draws a cursor at every ray hit, whatever it is told", async () => {
+    const setup = reference();
+    const stubborn = new FakeInputHost({ presence: true, pointerVisuals: true });
+    stubborn.enterSession();
+    const original = stubborn.applyPointerVisuals!;
+    stubborn.applyPointerVisuals = (sourceId, visuals) => original(sourceId, { ...visuals, ray: true, cursor: true });
+    const interactions = new ReferenceInteractionHost(stubborn);
+    const visualsCase = cases.find((c) => c.name.includes("exactly as told"))!;
+    await expect(visualsCase.run({ input: stubborn, interactions, testHost: interactions })).rejects.toThrow(/the host draws/);
+  });
+
+  it("fails a host that draws no disc where it was told, or keeps the disc after being told to stop", async () => {
+    const setup = reference();
+    const visualsCase = cases.find((c) => c.name.includes("exactly as told"))!;
+    class NoDisc extends ReferenceInteractionHost {
+      override cursors(): Vec3Tuple[] {
+        return [];
+      }
+    }
+    const noDisc = new NoDisc(setup.input);
+    await expect(visualsCase.run({ ...setup, interactions: noDisc, testHost: noDisc })).rejects.toThrow(/no cursor disc/);
+    class Sticky extends ReferenceInteractionHost {
+      override cursors(): Vec3Tuple[] {
+        return [[0, 1, -0.9]];
+      }
+    }
+    const sticky = new Sticky(setup.input);
+    await expect(visualsCase.run({ ...setup, interactions: sticky, testHost: sticky })).rejects.toThrow(/still draws/);
+    const lateStubborn = new FakeInputHost({ presence: true, pointerVisuals: true });
+    lateStubborn.enterSession();
+    const original = lateStubborn.applyPointerVisuals!;
+    lateStubborn.applyPointerVisuals = (sourceId, visuals) => original(sourceId, visuals.cursor ? visuals : { ...visuals, ray: false });
+    const lateHost = new ReferenceInteractionHost(lateStubborn);
+    await expect(visualsCase.run({ input: lateStubborn, interactions: lateHost, testHost: lateHost })).rejects.toThrow(/the host draws/);
+  });
+
+  it("fails a host with no physics slice, on the suite and on the held-target case", async () => {
+    const setup = reference();
+    const { physics: _unused, ...withoutPhysics } = setup;
+    void _unused;
+    const gravity = cases.find((c) => c.name.startsWith("physics/starts with IWSDK"))!;
+    await expect(gravity.run(withoutPhysics)).rejects.toThrow(/installs no physics slice/);
+    const held = cases.find((c) => c.name.includes("held and released through the physics slice"))!;
+    await expect(held.run(withoutPhysics)).rejects.toThrow(/installs no physics slice/);
+  });
+
+  it("fails a physics slice that breaks the shared suite, naming the case", async () => {
+    const setup = reference();
+    const gravity = cases.find((c) => c.name.startsWith("physics/starts with IWSDK"))!;
+    await expect(gravity.run({ ...setup, physics: new DefectivePhysics("noGravity") })).rejects.toThrow(/gravity must start at/);
+  });
+
+  it("fails a physics slice the binding cannot hold a target through", async () => {
+    const setup = reference();
+    const held = cases.find((c) => c.name.includes("held and released through the physics slice"))!;
+    await expect(held.run({ ...setup, physics: new DefectivePhysics("addIgnored") })).rejects.toThrow(/must add a body/);
+    await expect(held.run({ ...setup, physics: new DefectivePhysics("suspendIgnored") })).rejects.toThrow(/must suspend it/);
+    await expect(held.run({ ...setup, physics: new DefectivePhysics("resumeIgnored") })).rejects.toThrow(/must resume the body/);
+    await expect(held.run({ ...setup, physics: new DefectivePhysics("dropsVelocity") })).rejects.toThrow(/release velocity/);
+    await expect(held.run({ ...setup, physics: new DefectivePhysics("removeIgnored") })).rejects.toThrow(/must remove the body/);
   });
 
   it("fails a host whose cursors vanish with presence", async () => {
@@ -113,7 +222,7 @@ describe("native Interactions host conformance kit, every failure path", () => {
       }
     }
     const broken = new Forgetful(setup.input);
-    await expect(find("release velocity").run({ ...setup, interactions: broken, testHost: broken })).rejects.toThrow(/received undefined/);
+    await expect(find("hands the host the release velocity").run({ ...setup, interactions: broken, testHost: broken })).rejects.toThrow(/received undefined/);
   });
 
   it("fails outside a live session", async () => {

@@ -8,4 +8,5 @@ export * from "@realitycollective/webxr-interactions";
 export * from "./webxr-provider.js";
 export * from "./hit-tester.js";
 export * from "./transform-port.js";
+export * from "./physics-facility.js";
 export * from "./host.js";

@@ -5,23 +5,28 @@
  * Babylon API rather than importing it, so the tests supply objects of the
  * same shape. Nothing here mocks a module.
  */
-import type {
-  BabylonCameraLike,
-  BabylonHandTrackingLike,
-  BabylonMaterialLike,
-  BabylonMotionControllerComponentLike,
-  BabylonMotionControllerLike,
-  BabylonPhysicsBodyLike,
-  BabylonPickingInfoLike,
-  BabylonPointerInfoLike,
-  BabylonQuaternionLike,
-  BabylonRayLike,
-  BabylonSceneLike,
-  BabylonTransformNodeLike,
-  BabylonVector3Like,
-  BabylonXRControllerLike,
-  BabylonXRExperienceLike,
-  BabylonXRHandLike,
+import {
+  MemoryPhysicsFacility,
+  type BabylonCameraLike,
+  type BabylonHandTrackingLike,
+  type BabylonMaterialLike,
+  type BabylonMotionControllerComponentLike,
+  type BabylonMotionControllerLike,
+  type BabylonPhysicsBodyLike,
+  type BabylonPhysicsEngineLike,
+  type BabylonPhysicsKitLike,
+  type BabylonPhysicsShapeLike,
+  type BabylonPickingInfoLike,
+  type BabylonPointerInfoLike,
+  type BabylonQuaternionLike,
+  type BabylonRayLike,
+  type BabylonSceneLike,
+  type BabylonTransformNodeLike,
+  type BabylonVector3Like,
+  type BabylonXRControllerLike,
+  type BabylonXRExperienceLike,
+  type BabylonXRHandLike,
+  type PhysicsBodyState,
 } from "@realitycollective/babylon-interactions";
 
 /** A fake StandardMaterial-shaped material: `emissiveColor` only, no `emissiveIntensity`. */
@@ -65,6 +70,13 @@ export class FakePhysicsBody implements BabylonPhysicsBodyLike {
   linearVelocity: Vec3 = [0, 0, 0];
   angularVelocity: Vec3 = [0, 0, 0];
   readonly motionTypeWrites: FakeMotionType[] = [];
+  /** Below: inert stand-ins for `BabylonPhysicsFacility`'s wider interface - this fake only ever backs the older `physicsMotionTypes` hold, which never calls them. */
+  shape?: BabylonPhysicsShapeLike;
+  gravityFactor = 1;
+  linearDamping = 0;
+  angularDamping = 0;
+  targetTransformCalls: Array<[BabylonVector3Like, BabylonQuaternionLike]> = [];
+  disposeCalls = 0;
 
   constructor(private readonly node: { position: BabylonVector3Like }) {}
 
@@ -73,12 +85,44 @@ export class FakePhysicsBody implements BabylonPhysicsBodyLike {
     this.motionTypeWrites.push(this.motionType);
   }
 
+  getMotionType(): unknown {
+    return this.motionType;
+  }
+
   setLinearVelocity(velocity: BabylonVector3Like): void {
     this.linearVelocity = [velocity.x, velocity.y, velocity.z];
   }
 
+  getLinearVelocity(): BabylonVector3Like {
+    return v3(this.linearVelocity);
+  }
+
   setAngularVelocity(velocity: BabylonVector3Like): void {
     this.angularVelocity = [velocity.x, velocity.y, velocity.z];
+  }
+
+  getAngularVelocity(): BabylonVector3Like {
+    return v3(this.angularVelocity);
+  }
+
+  setGravityFactor(factor: number): void {
+    this.gravityFactor = factor;
+  }
+
+  setLinearDamping(damping: number): void {
+    this.linearDamping = damping;
+  }
+
+  setAngularDamping(damping: number): void {
+    this.angularDamping = damping;
+  }
+
+  setTargetTransform(position: BabylonVector3Like, rotation: BabylonQuaternionLike): void {
+    this.targetTransformCalls.push([position, rotation]);
+  }
+
+  dispose(): void {
+    this.disposeCalls += 1;
   }
 
   /** Gravity, for one step, skipped unless the body is DYNAMIC. */
@@ -370,4 +414,294 @@ export class FakeExperience implements BabylonXRExperienceLike {
 
 export function fakeCamera(position: Vec3, rotation: Quat = [0, 0, 0, 1]): BabylonCameraLike {
   return { globalPosition: v3(position), absoluteRotation: quat(rotation) };
+}
+
+// ---------------------------------------------------------------------------
+// A fake Havok-era Physics V2 kit for `BabylonPhysicsFacility`, standing in
+// for `@babylonjs/core`/`@babylonjs/havok`, which this package has no
+// dependency on. A fake body does not simulate anything itself - it mirrors
+// its motion type, shape (material, density) and velocities into a shared
+// `MemoryPhysicsFacility`, the family's own correct engine-free reference,
+// so the whole real integration (addBody -> shape -> body -> step -> read
+// back) is exercised end to end and behaves as a correct Havok body would.
+// ---------------------------------------------------------------------------
+
+/** Babylon's own `PhysicsMotionType` enum members - opaque values a fake round-trips through `setMotionType`/`getMotionType`. */
+export const HAVOK_MOTION_TYPES = { STATIC: "STATIC", ANIMATED: "ANIMATED", DYNAMIC: "DYNAMIC" } as const;
+
+function stateForMotionType(motionType: unknown): PhysicsBodyState {
+  if (motionType === HAVOK_MOTION_TYPES.STATIC) return "static";
+  if (motionType === HAVOK_MOTION_TYPES.ANIMATED) return "kinematic";
+  return "dynamic";
+}
+
+type FakeShapeKind = "sphere" | "box" | "capsule" | "mesh";
+
+class FakeHavokShape implements BabylonPhysicsShapeLike {
+  material = { friction: 0.5, restitution: 0 };
+  density = 1;
+  disposeCalls = 0;
+
+  constructor(
+    readonly kind: FakeShapeKind,
+    readonly dimensions: Vec3,
+  ) {}
+
+  dispose(): void {
+    this.disposeCalls += 1;
+  }
+}
+
+class FakeHavokBody implements BabylonPhysicsBodyLike {
+  disablePreStep = false;
+  readonly id: string;
+  private motionType: unknown;
+  private linear: Vec3 = [0, 0, 0];
+  private angular: Vec3 = [0, 0, 0];
+  private linearDamping = 0;
+  private angularDamping = 0;
+  private gravityFactor = 1;
+  private registered = false;
+  private _shape: FakeHavokShape | null = null;
+  disposeCalls = 0;
+
+  constructor(
+    private readonly memory: MemoryPhysicsFacility,
+    private readonly node: BabylonTransformNodeLike,
+    motionType: unknown,
+  ) {
+    this.motionType = motionType;
+    this.id = `havok-body-${nextHavokBodyId++}`;
+  }
+
+  get shape(): BabylonPhysicsShapeLike | null {
+    return this._shape;
+  }
+
+  set shape(value: BabylonPhysicsShapeLike | null | undefined) {
+    this._shape = (value as FakeHavokShape | null | undefined) ?? null;
+    if (!this._shape) return;
+    const shape = this._shape;
+    this.memory.addBody(
+      this.id,
+      nodeWorldPoseOf(this.node),
+      {
+        state: stateForMotionType(this.motionType),
+        linearDamping: this.linearDamping,
+        angularDamping: this.angularDamping,
+        gravityFactor: this.gravityFactor,
+      },
+      {
+        kind: shape.kind === "mesh" ? "auto" : shape.kind,
+        dimensions: shape.dimensions,
+        density: shape.density,
+        friction: shape.material.friction,
+        restitution: shape.material.restitution,
+      },
+    );
+    this.registered = true;
+  }
+
+  setMotionType(motionType: unknown): void {
+    this.motionType = motionType;
+    if (this.registered) this.memory.setBodyState(this.id, stateForMotionType(motionType));
+  }
+
+  getMotionType(): unknown {
+    return this.motionType;
+  }
+
+  setLinearVelocity(v: BabylonVector3Like): void {
+    this.linear = [v.x, v.y, v.z];
+    this.syncVelocity();
+  }
+
+  getLinearVelocity(): BabylonVector3Like {
+    return v3(this.registered ? this.memory.getVelocity(this.id).linear : this.linear);
+  }
+
+  setAngularVelocity(v: BabylonVector3Like): void {
+    this.angular = [v.x, v.y, v.z];
+    this.syncVelocity();
+  }
+
+  getAngularVelocity(): BabylonVector3Like {
+    return v3(this.registered ? this.memory.getVelocity(this.id).angular : this.angular);
+  }
+
+  setGravityFactor(factor: number): void {
+    this.gravityFactor = factor;
+  }
+
+  setLinearDamping(damping: number): void {
+    this.linearDamping = damping;
+  }
+
+  setAngularDamping(damping: number): void {
+    this.angularDamping = damping;
+  }
+
+  setTargetTransform(position: BabylonVector3Like, rotation: BabylonQuaternionLike): void {
+    if (!this.registered) return;
+    this.memory.setBodyPose(this.id, {
+      position: [position.x, position.y, position.z],
+      quaternion: [rotation.x, rotation.y, rotation.z, rotation.w],
+    });
+    this.linear = [0, 0, 0];
+    this.angular = [0, 0, 0];
+  }
+
+  dispose(): void {
+    this.disposeCalls += 1;
+    if (this.registered) this.memory.removeBody(this.id);
+    this.registered = false;
+  }
+
+  /** Read the simulated pose back into the node - what Babylon's own physics-drives-node sync does each step. */
+  writeNodeFromMemory(): void {
+    if (!this.registered) return;
+    const pose = this.memory.getBodyPose(this.id);
+    writeVec3(this.node.position, pose.position);
+    if (this.node.rotationQuaternion) writeQuat(this.node.rotationQuaternion, pose.quaternion);
+  }
+
+  private syncVelocity(): void {
+    if (this.registered) this.memory.setVelocity(this.id, { linear: this.linear, angular: this.angular });
+  }
+}
+
+let nextHavokBodyId = 0;
+
+function nodeWorldPoseOf(node: BabylonTransformNodeLike): { position: Vec3; quaternion: Quat } {
+  const position = node.getAbsolutePosition();
+  const rotation = node.absoluteRotationQuaternion ?? { x: 0, y: 0, z: 0, w: 1 };
+  return { position: [position.x, position.y, position.z], quaternion: [rotation.x, rotation.y, rotation.z, rotation.w] };
+}
+
+function writeVec3(target: BabylonVector3Like, value: Vec3): void {
+  target.x = value[0];
+  target.y = value[1];
+  target.z = value[2];
+}
+
+function writeQuat(target: BabylonQuaternionLike, value: Quat): void {
+  target.x = value[0];
+  target.y = value[1];
+  target.z = value[2];
+  target.w = value[3];
+}
+
+class FakeHavokEngine implements BabylonPhysicsEngineLike {
+  gravity: BabylonVector3Like = { x: 0, y: -9.81, z: 0 };
+  stepCalls = 0;
+
+  constructor(
+    private readonly memory: MemoryPhysicsFacility,
+    private readonly bodies: () => readonly FakeHavokBody[],
+  ) {}
+
+  setGravity(gravity: BabylonVector3Like): void {
+    this.gravity = { x: gravity.x, y: gravity.y, z: gravity.z };
+    this.memory.setGravity([gravity.x, gravity.y, gravity.z]);
+  }
+
+  _step(dtSeconds: number): void {
+    this.stepCalls += 1;
+    this.memory.step(dtSeconds);
+    for (const body of this.bodies()) body.writeNodeFromMemory();
+  }
+}
+
+export interface FakeHavokEnvironment {
+  scene: BabylonSceneLike;
+  kit: BabylonPhysicsKitLike;
+  memory: MemoryPhysicsFacility;
+  engine: FakeHavokEngine;
+  /** Register a node under an id, so `nodeFor` (and so `addBody`) can find it. */
+  place(id: string, node: BabylonTransformNodeLike): void;
+  nodeFor(id: string): BabylonTransformNodeLike | undefined;
+  /** The most recently constructed body - for inspecting the shape a `shapeFor` branch built. */
+  lastBody(): { shape?: BabylonPhysicsShapeLike | null } | undefined;
+  /** Detach the fake engine, as a scene that never called `scene.enablePhysics(...)` would answer. */
+  removeEngine(): void;
+}
+
+/** A fresh Havok-shaped kit and scene, backed by its own `MemoryPhysicsFacility` - build one per test. */
+export function createFakeHavok(): FakeHavokEnvironment {
+  const memory = new MemoryPhysicsFacility();
+  const nodes = new Map<string, BabylonTransformNodeLike>();
+  const bodies: FakeHavokBody[] = [];
+  let engine: FakeHavokEngine | null = new FakeHavokEngine(memory, () => bodies);
+  const liveEngine = engine;
+
+  class KitPhysicsBody extends FakeHavokBody {
+    constructor(node: BabylonTransformNodeLike, motionType: unknown, _startsAsleep: boolean, _scene: BabylonSceneLike) {
+      super(memory, node, motionType);
+      bodies.push(this);
+    }
+  }
+
+  const scene: BabylonSceneLike = {
+    getPhysicsEngine: () => engine,
+  };
+
+  const kit: BabylonPhysicsKitLike = {
+    PhysicsBody: KitPhysicsBody,
+    PhysicsShapeSphere: class extends FakeHavokShape {
+      constructor(_center: BabylonVector3Like, radius: number, _scene: BabylonSceneLike) {
+        super("sphere", [radius, 0, 0]);
+      }
+    },
+    PhysicsShapeBox: class extends FakeHavokShape {
+      constructor(_center: BabylonVector3Like, _rotation: BabylonQuaternionLike, extents: BabylonVector3Like, _scene: BabylonSceneLike) {
+        super("box", [extents.x, extents.y, extents.z]);
+      }
+    },
+    PhysicsShapeCapsule: class extends FakeHavokShape {
+      constructor(pointA: BabylonVector3Like, pointB: BabylonVector3Like, radius: number, _scene: BabylonSceneLike) {
+        const half = Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y, pointA.z - pointB.z) / 2;
+        super("capsule", [radius, half * 2 + radius * 2, 0]);
+      }
+    },
+    PhysicsShapeMesh: class extends FakeHavokShape {
+      constructor(_mesh: BabylonTransformNodeLike, _scene: BabylonSceneLike) {
+        super("mesh", [0, 0, 0]);
+      }
+    },
+    PhysicsMotionType: HAVOK_MOTION_TYPES,
+    Vector3: class implements BabylonVector3Like {
+      constructor(
+        public x: number,
+        public y: number,
+        public z: number,
+      ) {}
+    },
+    Quaternion: class implements BabylonQuaternionLike {
+      constructor(
+        public x: number,
+        public y: number,
+        public z: number,
+        public w: number,
+      ) {}
+    },
+  };
+
+  return {
+    scene,
+    kit,
+    memory,
+    engine: liveEngine,
+    place(id, node) {
+      nodes.set(id, node);
+    },
+    nodeFor(id) {
+      return nodes.get(id);
+    },
+    lastBody() {
+      return bodies[bodies.length - 1];
+    },
+    removeEngine() {
+      engine = null;
+    },
+  };
 }

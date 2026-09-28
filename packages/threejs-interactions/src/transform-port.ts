@@ -5,6 +5,12 @@
  * `getWorldPose()` reports where the object is now, and `getRestWorldPose()`
  * reports the rest pose in world space. An external mover that repositions
  * the object for good should call `recaptureRest()`.
+ *
+ * With a physics body (`options.physics`, the platform's `PhysicsFacility`
+ * and the body's id), the port applies the core held-pose rule through the
+ * facility: `beginHold` suspends the body, `endHold` resumes it with the
+ * release velocity, and `setWorldPose` teleports it with velocity cleared
+ * while not held. Without one the object is simply placed, as before.
  */
 import {
   Matrix4,
@@ -16,7 +22,24 @@ import {
   type Object3D,
 } from "three";
 import type { PoseTuple, QuatTuple, Vec3Tuple } from "@realitycollective/webxr-input";
-import type { TransformPort } from "@realitycollective/webxr-interactions";
+import type { HoldRelease, PhysicsFacility, TransformPort } from "@realitycollective/webxr-interactions";
+
+/** The body a port drives through the platform's physics facility. */
+export interface TransformPortPhysics {
+  facility: PhysicsFacility;
+  /** The body's id in the facility, the interactable's own id. */
+  bodyId: string;
+}
+
+export interface ThreeTransformPortOptions {
+  /**
+   * Present when the object has a physics body: the port then gains
+   * `beginHold`/`endHold` and its `setWorldPose` goes through the facility
+   * (a teleport with velocity cleared while not held, an exact write while
+   * held). Absent, the port has no hold members and only places the object.
+   */
+  physics?: TransformPortPhysics;
+}
 
 export class ThreeTransformPort implements TransformPort {
   private readonly object: Object3D;
@@ -24,6 +47,7 @@ export class ThreeTransformPort implements TransformPort {
   private readonly restQuaternion = new Quaternion();
   private readonly restScale = new Vector3();
   private baseEmissive: number | null = null;
+  private readonly physics: TransformPortPhysics | undefined;
 
   // Temps.
   private readonly v = new Vector3();
@@ -31,9 +55,18 @@ export class ThreeTransformPort implements TransformPort {
   private readonly q2 = new Quaternion();
   private readonly m = new Matrix4();
 
-  constructor(object: Object3D) {
+  readonly beginHold?: () => void;
+  readonly endHold?: (release: HoldRelease) => void;
+
+  constructor(object: Object3D, options: ThreeTransformPortOptions = {}) {
     this.object = object;
+    this.physics = options.physics;
     this.recaptureRest();
+    if (this.physics) {
+      const { facility, bodyId } = this.physics;
+      this.beginHold = () => facility.suspend(bodyId);
+      this.endHold = (release) => facility.resume(bodyId, release);
+    }
   }
 
   recaptureRest(): void {
@@ -42,6 +75,7 @@ export class ThreeTransformPort implements TransformPort {
     this.restScale.copy(this.object.scale);
   }
 
+  /** The LIVE pose of the object; with a body, the facility writes the simulated pose into the object each step. */
   getWorldPose(): PoseTuple {
     this.object.getWorldPosition(this.v);
     this.object.getWorldQuaternion(this.q);
@@ -78,14 +112,26 @@ export class ThreeTransformPort implements TransformPort {
   setLocalOffset(offset: Vec3Tuple): void {
     this.v.set(...offset).applyQuaternion(this.restQuaternion);
     this.object.position.copy(this.restPosition).add(this.v);
+    this.syncBody();
   }
 
   setLocalRotation(quaternion: QuatTuple): void {
     this.q.set(...quaternion);
     this.object.quaternion.copy(this.restQuaternion).multiply(this.q);
+    this.syncBody();
+  }
+
+  /** A behaviour's write to the object reaches its body too, as a placement (velocity cleared). */
+  private syncBody(): void {
+    if (!this.physics) return;
+    this.physics.facility.setBodyPose(this.physics.bodyId, this.getWorldPose());
   }
 
   setWorldPose(pose: PoseTuple): void {
+    // With a body, the facility owns its pose and velocity: held, the write
+    // is exact; not held, it is a teleport that rests the body. The object
+    // is written below as well, so it never lags the body.
+    if (this.physics) this.physics.facility.setBodyPose(this.physics.bodyId, pose);
     const parent = this.object.parent;
     this.v.set(...pose.position);
     this.q.set(...pose.quaternion);

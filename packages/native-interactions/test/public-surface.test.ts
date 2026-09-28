@@ -16,6 +16,7 @@ describe("native-interactions public surface", () => {
       "NativeHitTester",
       "NativeInputProvider",
       "NativeInteractions",
+      "NativePhysicsFacility",
       "NativeTransformPort",
       "createNativeInteractions",
       "nativeInteractionsHostConformanceCases",

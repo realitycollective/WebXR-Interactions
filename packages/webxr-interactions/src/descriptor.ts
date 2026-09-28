@@ -14,7 +14,13 @@ export interface InteractableDescriptor {
   gaze?: GazeConfig;
   /** Registered disabled when false (enable later via the runtime). */
   enabled?: boolean;
-  /** Poke/proximity trigger radius in meters (default 0.05). */
+  /**
+   * The touch hover ENTER distance for this target, metres to its surface:
+   * a fingertip within it makes touch the active pointer (default 0.15,
+   * IWSDK's `enterHoverDistance`; the exit distance is 0.05 beyond it). The
+   * press distance (0.02) is the runtime's `nearPointer` option, not per
+   * target. See `near-pointer.ts`.
+   */
   pokeRadius?: number;
 }
 

@@ -9,6 +9,16 @@
  * world matrix needs recomputing, so in-place writes are seen; assigning a
  * plain object in their place would break Babylon, which calls methods on
  * them.
+ *
+ * A node's held pose comes from one of two independent mechanisms. With
+ * `options.physics` (a platform `PhysicsFacility` and the node's body id -
+ * see `BabylonPhysicsFacility`), the port drives the core's held-pose rule
+ * through it: `beginHold`/`endHold` suspend and resume the body there, and
+ * every write that moves the node (`setWorldPose`, `setLocalOffset`,
+ * `setLocalRotation`) keeps the body's own pose in step. Without it, a node
+ * with a bare `node.physicsBody` and `options.physicsMotionTypes` keeps the
+ * older, narrower hold this port has always had - see that option's own
+ * comment. A construction never needs both.
  */
 import type { PoseTuple, QuatTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
@@ -18,6 +28,7 @@ import {
   vApplyQuat,
   vSub,
   type HoldRelease,
+  type PhysicsFacility,
   type TransformPort,
 } from "@realitycollective/webxr-interactions";
 import {
@@ -56,9 +67,25 @@ export interface BabylonTransformPortOptions {
    * `beginHold`/`endHold` exist on the port only when BOTH this option and
    * `node.physicsBody` are present at construction - a node with no
    * physics body, or a construction with no motion types, gets neither
-   * member and behaves exactly as before.
+   * member and behaves exactly as before. Ignored when `physics` is given.
    */
   physicsMotionTypes?: { animated: unknown; dynamic: unknown };
+  /**
+   * Drive the held-pose rule through the platform's physics facility
+   * instead of `node.physicsBody` directly - the body id is the same
+   * string id the node was registered under. Present, `beginHold`/`endHold`
+   * suspend and resume the body there, and `setWorldPose`, `setLocalOffset`
+   * and `setLocalRotation` all keep the body's pose in step with the node's.
+   * Takes precedence over `physicsMotionTypes` when both are given.
+   */
+  physics?: BabylonTransformPortPhysics;
+}
+
+/** The body a port drives through the platform's `PhysicsFacility`. */
+export interface BabylonTransformPortPhysics {
+  facility: PhysicsFacility;
+  /** The body's id in the facility - the interactable's own id. */
+  bodyId: string;
 }
 
 export class BabylonTransformPort implements TransformPort {
@@ -72,6 +99,7 @@ export class BabylonTransformPort implements TransformPort {
   private baseEmissiveColor: Vec3Tuple | null = null;
   /** PBRMaterial's `emissiveIntensity` before any pulse, captured on first use - StandardMaterial has none. */
   private baseEmissiveIntensity: number | null = null;
+  private readonly physics: BabylonTransformPortPhysics | undefined;
 
   readonly beginHold?: () => void;
   readonly endHold?: (release: HoldRelease) => void;
@@ -80,6 +108,14 @@ export class BabylonTransformPort implements TransformPort {
     this.node = node;
     this.createQuaternion = options.createQuaternion ?? (() => ({ x: 0, y: 0, z: 0, w: 1 }));
     this.recaptureRest();
+
+    this.physics = options.physics;
+    if (this.physics) {
+      const { facility, bodyId } = this.physics;
+      this.beginHold = () => facility.suspend(bodyId);
+      this.endHold = (release) => facility.resume(bodyId, release);
+      return;
+    }
 
     const body = node.physicsBody;
     const motionTypes = options.physicsMotionTypes;
@@ -140,10 +176,18 @@ export class BabylonTransformPort implements TransformPort {
 
   setLocalOffset(offset: Vec3Tuple): void {
     writeVec3(this.node.position, vAdd(this.restPosition, vApplyQuat(offset, this.restQuaternion)));
+    this.syncBody();
   }
 
   setLocalRotation(quaternion: QuatTuple): void {
     this.writeRotation(quatMultiply(this.restQuaternion, quaternion));
+    this.syncBody();
+  }
+
+  /** A behaviour's write to the node reaches its facility-driven body too, as a placement (velocity cleared). */
+  private syncBody(): void {
+    if (!this.physics) return;
+    this.physics.facility.setBodyPose(this.physics.bodyId, this.getWorldPose());
   }
 
   /**
@@ -158,6 +202,12 @@ export class BabylonTransformPort implements TransformPort {
    * sit under an unscaled parent, which is how the demos build them.
    */
   setWorldPose(pose: PoseTuple): void {
+    // With a facility-driven body, the facility owns its pose and velocity
+    // and also places the node itself; the write below runs regardless, so
+    // the node never lags the body even if the facility placed it slightly
+    // differently (a scaled parent, for one - see BabylonPhysicsFacility's
+    // own resolution).
+    if (this.physics) this.physics.facility.setBodyPose(this.physics.bodyId, pose);
     const parent = parentOf(this.node);
     if (!parent) {
       writeVec3(this.node.position, pose.position);

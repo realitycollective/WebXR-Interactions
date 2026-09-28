@@ -117,11 +117,11 @@ describe("poke priority and grab", () => {
     expect(enter).toContain("handle");
   });
 
-  it("honours the interactable's own pokeRadius", () => {
-    // "handle" keeps the 5 cm default; "plate" asks for 12 cm. The query goes
-    // out at the largest radius registered, and a hit counts only when it is
-    // inside the radius of the interactable it landed on. Before this the
-    // descriptor field was stored and never read: every poke used the default.
+  it("honours the interactable's own pokeRadius as its touch hover distance", () => {
+    // "handle" keeps the 15 cm default; "plate" asks for 12 cm. The touch query
+    // goes out at the largest enter distance registered plus the 5 cm
+    // hysteresis, and a hit counts only when it is inside the band of the
+    // interactable it landed on. The grab query follows at the grab radius.
     runtime.registerInteractable(
       { id: "plate", behaviours: [{ kind: "press" }], pokeRadius: 0.12 },
       { transform: new FakeTransform() },
@@ -130,14 +130,16 @@ describe("poke priority and grab", () => {
     hitTester.proximityDistance = 0.1;
     provider.sources = [handSource("right-hand")];
     runtime.update(1 / 60);
-    expect(hitTester.lastProximityRadius).toBeCloseTo(0.12);
+    expect(hitTester.proximityRadii).toEqual([0.2, 0.07]);
     expect(events.filter((e) => e.type === "hoverEnter").map((e) => e.interactableId)).toContain("plate");
 
-    // The same 10 cm fingertip over "handle" is outside handle's 5 cm radius,
-    // even though the query radius was wide enough to return it.
+    // A 16 cm fingertip over "handle" is outside handle's 15 cm enter
+    // distance, even though the query radius was wide enough to return it.
+    // A fresh source, so no hover hysteresis carries over from the plate.
     events.length = 0;
     hitTester.proximityTarget = "handle";
-    provider.sources = [handSource("right-hand")];
+    hitTester.proximityDistance = 0.16;
+    provider.sources = [handSource("left-hand", { handedness: "left" })];
     runtime.update(1 / 60);
     expect(events.filter((e) => e.type === "hoverEnter").map((e) => e.interactableId)).not.toContain("handle");
   });

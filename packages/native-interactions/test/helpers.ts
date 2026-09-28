@@ -23,7 +23,7 @@ import type {
   Unsubscribe,
   Vec3Tuple,
 } from "@realitycollective/webxr-input";
-import { coneHitForSpheres, type HoldRelease, type SphereTarget } from "@realitycollective/webxr-interactions";
+import { coneHitForSpheres, type HoldRelease, type PointerVisuals, type SphereTarget } from "@realitycollective/webxr-interactions";
 import type {
   NativeHit,
   NativeInputFacts,
@@ -40,6 +40,8 @@ export interface FakeInputHostCapable {
   presence?: boolean;
   /** The host can pose the gaze (`getEyeGazePose`); `eyeTracking` is the fact, set separately. */
   eyeGaze?: boolean;
+  /** The host draws the ray and cursor as told (`applyPointerVisuals`). */
+  pointerVisuals?: boolean;
 }
 
 export class FakeInputHost implements NativeInputHost {
@@ -74,14 +76,25 @@ export class FakeInputHost implements NativeInputHost {
   readonly shown: Partial<Record<"left" | "right", NativePresenceShown>> = {};
   /** Cursor discs drawn, which a correct host keeps whatever presence says. */
   cursorPoints: Vec3Tuple[] = [];
+  /** What each source draws now, as last told through `applyPointerVisuals`. */
+  readonly visualsBySource = new Map<string, PointerVisuals>();
+  /** Every `applyPointerVisuals` call, in order. */
+  readonly visualsCalls: Array<[string, PointerVisuals]> = [];
 
   getHeadPose?: () => HeadPose;
   getEyeGazePose?: () => PoseTuple | null;
   sampleHints?: () => readonly InputHitHint[];
   pulse?: (sourceId: string, intensity: number, durationMs: number) => boolean;
   applyPresence?: (side: "left" | "right", shown: NativePresenceShown) => void;
+  applyPointerVisuals?: (sourceId: string, visuals: PointerVisuals) => void;
 
   constructor(capable: FakeInputHostCapable = {}) {
+    if (capable.pointerVisuals) {
+      this.applyPointerVisuals = (sourceId, visuals) => {
+        this.visualsCalls.push([sourceId, visuals]);
+        this.visualsBySource.set(sourceId, visuals);
+      };
+    }
     if (capable.headPose) this.getHeadPose = () => this.headPoseValue;
     if (capable.eyeGaze) this.getEyeGazePose = () => this.eyeGazePose;
     if (capable.hints) this.sampleHints = () => this.hints;
@@ -373,8 +386,17 @@ export class ReferenceInteractionHost extends FakeInteractionHost implements Nat
     return this.input?.shown[side];
   }
 
+  /** A correct host draws a cursor exactly where it was told to, and its own test discs. */
   cursors(): Vec3Tuple[] {
-    return (this.input?.cursorPoints ?? []).map((point) => [...point] as Vec3Tuple);
+    const told: Vec3Tuple[] = [];
+    for (const visuals of this.input?.visualsBySource.values() ?? []) {
+      if (visuals.cursor && visuals.cursorPoint) told.push([...visuals.cursorPoint] as Vec3Tuple);
+    }
+    return [...(this.input?.cursorPoints ?? []).map((point) => [...point] as Vec3Tuple), ...told];
+  }
+
+  pointerVisuals(sourceId: string): PointerVisuals | undefined {
+    return this.input?.visualsBySource.get(sourceId);
   }
 
   override hitRay(ray: RayTuple): NativeHit | null {

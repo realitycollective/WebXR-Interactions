@@ -30,6 +30,7 @@
  *  - A live session that is not `"visible"` samples no sources, the same
  *    rule IWSDK's provider applies, when the app supplies `xr`.
  */
+import { Quaternion, Vector3 } from "three";
 import {
   NO_CAPABILITIES,
   type HeadPose,
@@ -148,8 +149,11 @@ export interface XRBlocksProviderOptions {
 
 type Side = "left" | "right";
 
-const SCRATCH_V = { x: 0, y: 0, z: 0 };
-const SCRATCH_Q = { x: 0, y: 0, z: 0, w: 1 };
+// Real three.js scratch objects: XR Blocks' camera is a three.js camera, and
+// `Object3D.getWorldPosition` writes through `Vector3` methods on its target,
+// so a plain `{ x, y, z }` here throws against the real engine.
+const SCRATCH_V = new Vector3();
+const SCRATCH_Q = new Quaternion();
 
 export class XRBlocksInputProvider implements InputProvider {
   private readonly context: XRBlocksContext;
