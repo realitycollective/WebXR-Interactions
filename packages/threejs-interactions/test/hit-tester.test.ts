@@ -49,12 +49,24 @@ describe("ThreeHitTester proximity", () => {
     expect(tester.hitProximity([0, 0.8, 0], 0.05)).toBeNull();
   });
 
-  it("treats a plain group as a point target", () => {
+  it("treats a plain group as a 0.1 m sphere by default", () => {
     const tester = new ThreeHitTester();
     const group = new Group();
     group.position.set(0, 1, 0);
     group.updateMatrixWorld(true);
     tester.register("group", group);
+
+    // 0.15 m from the centre is 0.05 m outside the 0.1 m default radius.
+    expect(tester.hitProximity([0, 1.15, 0], 0.06)?.distance).toBeCloseTo(0.05);
+    expect(tester.hitProximity([0, 1.15, 0], 0.04)).toBeNull();
+  });
+
+  it("treats a plain group as a point target when registered with an explicit zero radius", () => {
+    const tester = new ThreeHitTester();
+    const group = new Group();
+    group.position.set(0, 1, 0);
+    group.updateMatrixWorld(true);
+    tester.register("group", group, 0);
 
     expect(tester.hitProximity([0, 1.03, 0], 0.05)?.distance).toBeCloseTo(0.03);
     expect(tester.hitProximity([0, 1.1, 0], 0.05)).toBeNull();

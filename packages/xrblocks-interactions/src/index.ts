@@ -6,4 +6,5 @@
 export * from "@realitycollective/threejs-interactions";
 
 export * from "./provider.js";
+export * from "./transform-port.js";
 export * from "./host.js";

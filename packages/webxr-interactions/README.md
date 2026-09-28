@@ -33,6 +33,8 @@ All input arrives through the shared [`@realitycollective/webxr-input`](https://
 
 Every adapter implements `HitTester` and `TransformPort` (see `ports.ts`) against its own scene graph, so this package ships the checks as data rather than as tests: `hitTesterContractCases()` and `transformPortContractCases()`, alongside `inputProviderContractCases()` from [`@realitycollective/webxr-input`](https://www.npmjs.com/package/@realitycollective/webxr-input) for `InputProvider`. Each case throws a plain `Error` naming the rule a platform broke, so any test runner can host it - an adapter written outside this repository runs the same suite its own way. All three run against every platform in `packages/iwsdk-interactions/test/`, next to each other: `provider-parity.test.ts` for `InputProvider`, `port-parity.test.ts` for `HitTester` and `TransformPort`.
 
+**Held pose.** `TransformPort` has two optional members for an object with a physics body: `beginHold()` suspends physics, and `endHold(release: HoldRelease)` resumes it with the hand's linear and angular velocity. While held, `setWorldPose` follows exactly and leaves velocities alone; while not held, it teleports and clears them. The `poseOnly` grab calls both. A port whose host has no physics implements neither and behaves as before; a platform that grabs natively must show the same held, released and reset behaviours through its own engine. `transformPortContractCases()` has three cases for this, which run when the subject has a `physics` driver and skip otherwise.
+
 ## Live demo
 
 The interaction playground - the full station set, mouse-capable on desktop, VR button for headsets: **[webxr-interactions.pages.dev](https://webxr-interactions.pages.dev)**

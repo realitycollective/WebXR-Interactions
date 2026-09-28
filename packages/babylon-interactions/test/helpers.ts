@@ -8,6 +8,7 @@
 import type {
   BabylonCameraLike,
   BabylonHandTrackingLike,
+  BabylonMaterialLike,
   BabylonMotionControllerComponentLike,
   BabylonMotionControllerLike,
   BabylonPhysicsBodyLike,
@@ -22,6 +23,16 @@ import type {
   BabylonXRExperienceLike,
   BabylonXRHandLike,
 } from "@realitycollective/babylon-interactions";
+
+/** A fake StandardMaterial-shaped material: `emissiveColor` only, no `emissiveIntensity`. */
+export function fakeStandardMaterial(emissiveColor: Vec3 = [0, 0, 0]): BabylonMaterialLike {
+  return { emissiveColor: v3(emissiveColor) };
+}
+
+/** A fake PBRMaterial-shaped material: `emissiveColor` plus `emissiveIntensity`. */
+export function fakePbrMaterial(emissiveColor: Vec3 = [0, 0, 0], emissiveIntensity = 1): BabylonMaterialLike {
+  return { emissiveColor: v3(emissiveColor), emissiveIntensity };
+}
 
 export type Vec3 = [number, number, number];
 export type Quat = [number, number, number, number];
@@ -118,6 +129,8 @@ export interface FakeNodeOptions {
   enabled?: boolean;
   /** Attaches a {@link FakePhysicsBody}, reachable as `node.physicsBody`. */
   physics?: boolean;
+  /** `AbstractMesh.material` - single or an array, for `setEffect`'s emissive pulse. */
+  material?: BabylonMaterialLike | BabylonMaterialLike[];
 }
 
 export class FakeNode implements BabylonTransformNodeLike {
@@ -127,6 +140,7 @@ export class FakeNode implements BabylonTransformNodeLike {
   parent: unknown;
   isVisible: boolean;
   enabled: boolean;
+  material?: BabylonMaterialLike | BabylonMaterialLike[];
   computeWorldMatrixCalls = 0;
   readonly enabledWrites: boolean[] = [];
   readonly physicsBody?: FakePhysicsBody;
@@ -135,6 +149,7 @@ export class FakeNode implements BabylonTransformNodeLike {
 
   constructor(options: FakeNodeOptions = {}) {
     this.position = v3(options.position ?? [0, 0, 0]);
+    if (options.material !== undefined) this.material = options.material;
     this.rotationQuaternion =
       options.rotationQuaternion === undefined
         ? null
@@ -310,9 +325,14 @@ export class FakeExperience implements BabylonXRExperienceLike {
 
   /** Start a session with these controllers. */
   start(...controllers: BabylonXRControllerLike[]): void {
-    this.session = { id: "session" };
+    this.session = { id: "session", visibilityState: "visible" };
     this.controllers = controllers;
     this.onXRSessionInit.notify(this.session);
+  }
+
+  /** Set the live session's `visibilityState`, as the browser would. */
+  setVisibility(state: string): void {
+    (this.session as { visibilityState?: string }).visibilityState = state;
   }
 
   end(): void {

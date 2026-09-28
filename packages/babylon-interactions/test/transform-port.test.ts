@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { BabylonTransformPort } from "@realitycollective/babylon-interactions";
-import { BARE_PARENT, FakeNode, HALF_TURN_Y, PHYSICS_MOTION_TYPES, quat } from "./helpers.js";
+import {
+  BARE_PARENT,
+  FakeNode,
+  HALF_TURN_Y,
+  PHYSICS_MOTION_TYPES,
+  fakePbrMaterial,
+  fakeStandardMaterial,
+  quat,
+} from "./helpers.js";
 
 describe("BabylonTransformPort offsets", () => {
   it("reports nothing at rest and round-trips an offset", () => {
@@ -148,7 +156,7 @@ describe("BabylonTransformPort effects", () => {
     expect(node.scaling).toEqual({ x: 2, y: 2, z: 2 });
   });
 
-  it("ignores an emissive-only intent and a node with no scaling", () => {
+  it("leaves scaling alone for an emissive-only intent, and does not throw with no material at all", () => {
     const node = new FakeNode({ scaling: [1, 1, 1] });
     const port = new BabylonTransformPort(node);
     port.setEffect({ emissive: 0.5 });
@@ -156,6 +164,55 @@ describe("BabylonTransformPort effects", () => {
 
     const bare = { position: { x: 0, y: 0, z: 0 }, getAbsolutePosition: () => ({ x: 0, y: 0, z: 0 }) };
     expect(() => new BabylonTransformPort(bare).setEffect({ scale: 2 })).not.toThrow();
+    expect(() => new BabylonTransformPort(bare).setEffect({ emissive: 0.5 })).not.toThrow();
+  });
+});
+
+describe("BabylonTransformPort emissive pulse", () => {
+  it("scales a StandardMaterial's emissiveColor about its base, with no emissiveIntensity field to touch", () => {
+    const material = fakeStandardMaterial([0.2, 0.4, 0.1]);
+    const node = new FakeNode({ material });
+    const port = new BabylonTransformPort(node);
+    port.setEffect({ emissive: 0.5 });
+    expect(material.emissiveColor?.x).toBeCloseTo(0.3);
+    expect(material.emissiveColor?.y).toBeCloseTo(0.6);
+    expect(material.emissiveColor?.z).toBeCloseTo(0.15);
+    expect(material.emissiveIntensity).toBeUndefined();
+
+    // The last write wins, from the same captured base - not compounded.
+    port.setEffect({ emissive: 0 });
+    expect(material.emissiveColor?.x).toBeCloseTo(0.2);
+    expect(material.emissiveColor?.y).toBeCloseTo(0.4);
+    expect(material.emissiveColor?.z).toBeCloseTo(0.1);
+  });
+
+  it("scales emissiveColor AND adds to emissiveIntensity for a PBRMaterial, from its own base", () => {
+    const material = fakePbrMaterial([0.1, 0.1, 0.1], 1.2);
+    const node = new FakeNode({ material });
+    const port = new BabylonTransformPort(node);
+    port.setEffect({ emissive: 1.5 });
+    expect(material.emissiveColor?.x).toBeCloseTo(0.25);
+    expect(material.emissiveColor?.y).toBeCloseTo(0.25);
+    expect(material.emissiveColor?.z).toBeCloseTo(0.25);
+    // Additive over the base 1.2, the same rule three.js's emissiveIntensity follows.
+    expect(material.emissiveIntensity).toBeCloseTo(2.7);
+
+    port.setEffect({ emissive: 0 });
+    expect(material.emissiveIntensity).toBeCloseTo(1.2);
+  });
+
+  it("uses the first slot of a multi-material mesh", () => {
+    const first = fakeStandardMaterial([1, 0, 0]);
+    const second = fakeStandardMaterial([0, 1, 0]);
+    const node = new FakeNode({ material: [first, second] });
+    new BabylonTransformPort(node).setEffect({ emissive: 1 });
+    expect(first.emissiveColor).toEqual({ x: 2, y: 0, z: 0 });
+    expect(second.emissiveColor).toEqual({ x: 0, y: 1, z: 0 });
+  });
+
+  it("leaves a material with no emissiveColor alone", () => {
+    const node = new FakeNode({ material: {} });
+    expect(() => new BabylonTransformPort(node).setEffect({ emissive: 0.5 })).not.toThrow();
   });
 });
 

@@ -3,30 +3,33 @@
  * CompositorServices on visionOS, or any other shell embedding a JavaScript
  * engine such as Hermes) installs on `globalThis.__rcHost`.
  *
- * These are NOT new contracts: `NativeInputHost` is the exact shape of
- * `InputProvider` from `@realitycollective/webxr-input`, and
+ * A HOST IS HANDED RESULTS, NOT RULES. Every rule the IWSDK binding applies
+ * in its provider runs in this package from the same inputs: capabilities
+ * are derived here from the facts the host reports, the presence modality
+ * is decided here and handed to the host per side, and a target's radius is
+ * handed to the host at registration. The host measures, renders and
+ * reports. Each member below states what the host does, in what units and
+ * with what sign, and which IWSDK line it stands in for.
+ *
  * `NativeInteractionHost` is `HitTester` plus `TransformPort` from
- * `@realitycollective/webxr-interactions/ports`, with a `targetId` added to
- * every `TransformPort` member because that port is per object and the host
- * is one object serving every registered interactable. Declaring them again
- * here, rather than reusing the originals by reference, is deliberate: this
- * file is the one place that states what crosses the native boundary, kept
- * in the same structural-typing style as `babylon-types.ts` and the XR
- * Blocks `XB*Like` types, so it reads correctly even without the other two
- * packages open.
+ * `@realitycollective/webxr-interactions`, with a `targetId` added to every
+ * `TransformPort` member because that port is per object and the host is one
+ * object serving every registered interactable. Declaring the shapes here,
+ * rather than reusing the originals by reference, is deliberate: this file is
+ * the one place that states what crosses the native boundary, in the same
+ * structural-typing style as `babylon-types.ts` and the XR Blocks `XB*Like`
+ * types.
  *
  * Values that cross are plain: numbers, strings, booleans and tuples. No
- * engine objects in either direction, and assets stay entirely on the
- * native side.
+ * engine objects in either direction, and assets stay on the native side.
+ * Units are metres, seconds and radians; poses are world space, quaternions
+ * `[x, y, z, w]`, right handed, +Y up.
  */
 import type {
-  Handedness,
   HeadPose,
-  InputCapabilities,
   InputHitHint,
   InputSourceSnapshot,
   PoseTuple,
-  PresenceModality,
   QuatTuple,
   RayTuple,
   Unsubscribe,
@@ -34,57 +37,181 @@ import type {
 } from "@realitycollective/webxr-input";
 import type { HoldRelease } from "@realitycollective/webxr-interactions";
 
-/** The native host's `input` slice. Mirrors `InputProvider` member for member. */
-export interface NativeInputHost {
-  getCapabilities(): InputCapabilities;
-  onCapabilitiesChanged(listener: (capabilities: InputCapabilities) => void): Unsubscribe;
-  onSourcesChanged(listener: () => void): Unsubscribe;
-  sample(): readonly InputSourceSnapshot[];
-  getHeadPose?(): HeadPose;
-  sampleHints?(): readonly InputHitHint[];
-  pulse?(sourceId: string, intensity: number, durationMs: number): boolean;
-  setPresenceVisible?(target: Handedness | "all", visible: boolean): boolean;
-  setPresenceModality?(mode: PresenceModality): boolean;
+/**
+ * What the host knows about its session, from which this package derives
+ * `InputCapabilities` exactly as `IWSDKInputProvider.refreshCapabilities`
+ * does from the WebXR session.
+ */
+export interface NativeInputFacts {
+  /** A session is presenting: OpenXR `SYNCHRONIZED`, `VISIBLE` or `FOCUSED`. IWSDK: `world.session` exists. */
+  immersive: boolean;
+  /**
+   * The session has input focus: OpenXR `FOCUSED`. While false no sources are
+   * sampled, as IWSDK's provider returns none unless the visibility state is
+   * `Visible`.
+   */
+  focused: boolean;
+  /**
+   * Hand tracking is enabled on the session (`XR_EXT_hand_tracking` and the
+   * system supports it). IWSDK: `session.enabledFeatures` includes
+   * `"hand-tracking"`. A tracked hand source also counts, without this.
+   */
+  handTracking: boolean;
 }
 
-/** What the host's ray/proximity query reports: the target it reached, if any. */
+/**
+ * What one side's presence visuals should show, handed to the host. The host
+ * draws exactly this and decides nothing: which family is shown for
+ * `"auto"`, and which side a request targets, are this package's.
+ */
+export interface NativePresenceShown {
+  /** Draw this side's hand mesh. */
+  hand: boolean;
+  /** Draw this side's controller model. */
+  controller: boolean;
+}
+
+/**
+ * The native host's `input` slice. The host reports facts, sources and
+ * signals; `NativeInputProvider` turns them into the `InputProvider`
+ * contract.
+ */
+export interface NativeInputHost {
+  /** This moment's session facts. Read at construction and on every signal. */
+  getFacts(): NativeInputFacts;
+  /** The facts changed: session start or end, focus gained or lost. */
+  onFactsChanged(listener: () => void): Unsubscribe;
+  /** A source connected or disconnected (WebXR `inputsourceschange`). Capabilities re-derive on it. */
+  onSourcesChanged(listener: () => void): Unsubscribe;
+  /**
+   * This frame's tracked sources, in the `InputSourceSnapshot` shape. `kind`
+   * is `"hand"` while hand joints are tracked, else `"controller"`.
+   * `select` is the trigger value, or 1 while the runtime reports selecting
+   * (a hand pinch), 0..1; `squeeze` is the grip value, 0 for hands.
+   * `gripPose` is the WebXR GRIP frame, not a hand joint - see
+   * `InputSourceSnapshot.gripPose`. `indexTip` is the index fingertip for a
+   * hand and the ray origin for a controller. `hapticsAvailable` is true when
+   * the source has an actuator. The host may reuse its buffers: this package
+   * copies every snapshot.
+   */
+  sample(): readonly InputSourceSnapshot[];
+  /** The viewer's head pose this frame. Present on any host that tracks a head; capabilities `gaze` and `headPose` follow it. */
+  getHeadPose?(): HeadPose;
+  /**
+   * Pre-resolved targeting hints, for a host with its own targeting. Frame
+   * fresh: the hints for the frame `sample()` just reported. A hint beats the
+   * core's own hit tests, and is equivalent to `nativeGrabbing` for a grab.
+   */
+  sampleHints?(): readonly InputHitHint[];
+  /**
+   * Fire a haptic pulse on a source. `intensity` 0..1 (already clamped),
+   * `durationMs` in milliseconds. Returns false when it could not be
+   * delivered. IWSDK: `actuator.pulse(intensity, durationMs)`.
+   */
+  pulse?(sourceId: string, intensity: number, durationMs: number): boolean;
+  /**
+   * Show or hide one side's hand mesh and controller model, as decided here
+   * (`IWSDKInputProvider.applyPresence`). Presence is the MODELS only: the
+   * host never draws a ray for a hand, and it draws a cursor disc at every
+   * ray's hit on a panel or an interactable whatever presence says, as
+   * IWSDK's `CursorVisual` is. Called only when a side's result changed.
+   * Without this member `capabilities.presence` is false.
+   */
+  applyPresence?(side: "left" | "right", shown: NativePresenceShown): void;
+}
+
+/** What the host's ray or proximity query reports: the target it reached, if any. */
 export interface NativeHit {
-  /** The target id the app registered with `NativeTransformPort`/its own scene. */
+  /** The target id the app registered with the native scene. */
   targetId: string;
-  /** Distance from the query origin (ray origin / probe point). */
+  /** `hitRay`: the ray parameter t, metres. `hitProximity`: metres to the target's SURFACE, never negative. */
   distance: number;
-  /** World-space hit or closest point. */
+  /** World-space hit point, or the target's centre. */
   point: Vec3Tuple;
 }
 
 /**
- * The native host's `interactions` slice: `HitTester` unchanged, and
- * `TransformPort` with every member keyed by the target id the app chose
- * when it registered the object with the native scene, because one host
- * object serves every interactable rather than one port per object.
+ * The native host's `interactions` slice: `HitTester` with its semantics
+ * stated, and `TransformPort` with every member keyed by the target id the
+ * app chose when it registered the object with the native scene.
  */
 export interface NativeInteractionHost {
+  /**
+   * The nearest shown target along `ray` (origin in metres, direction
+   * normalised). A target counts when its centre is within its radius of the
+   * ray line and in front of the origin; `distance` is the ray parameter of
+   * the closest point, and `t <= 0` never hits. A host that tests triangle
+   * meshes instead may report the surface it hit; the contract cases accept
+   * any answer within the target's radius plus 0.05 m of the sphere answer.
+   * IWSDK: `EntityHitTester.hitRay`.
+   */
   hitRay(ray: RayTuple): NativeHit | null;
+  /**
+   * The nearest shown target whose SURFACE is within `radius` metres of
+   * `point`. `distance = max(0, |centre - point| - targetRadius)`: a point
+   * 3 cm outside a 10 cm target reports 0.03, a point inside reports 0.
+   * Never the distance to the centre. IWSDK: `EntityHitTester.hitProximity`.
+   */
   hitProximity(point: Vec3Tuple, radius: number): NativeHit | null;
+  /**
+   * The radius, in metres, the host hit-tests a registered target with.
+   * Called once per registration with the app's `targetRadius`, or 0.1 when
+   * it gave none, as IWSDK registers a bare target as a 10 cm sphere
+   * (`register.ts`, `options.targetRadius ?? 0.1`). A host never excludes a
+   * target from hit testing because of its radius.
+   */
+  setTargetRadius(targetId: string, radius: number): void;
   /** Where the object is now. */
   getWorldPose(targetId: string): PoseTuple;
   /** The rest pose captured at registration, in world space. */
   getRestWorldPose(targetId: string): PoseTuple;
+  /** The offset from rest last written, metres, in the rest frame. */
   getLocalOffset(targetId: string): Vec3Tuple;
+  /** Offset the object from its rest pose, metres, in the rest frame. */
   setLocalOffset(targetId: string, offset: Vec3Tuple): void;
+  /** Rotate the object from its rest orientation. */
   setLocalRotation(targetId: string, quaternion: QuatTuple): void;
+  /** Place the object at a world pose (the pose-only grab carry). */
   setWorldPose?(targetId: string, pose: PoseTuple): void;
+  /**
+   * The pulse effect: `scale` multiplies the rest scale, `emissive` is added
+   * to the base emissive intensity. Last write wins per field.
+   */
   setEffect?(targetId: string, effect: { scale?: number; emissive?: number }): void;
   /**
-   * Suspend physics for `targetId` - see `TransformPort.beginHold` in
-   * `@realitycollective/webxr-interactions`. Present only on a host that
-   * can drive its own physics this way; a host with no physics, or a
-   * native app that fulfils grabs itself through its own engine, never
-   * needs it - see this package's README.
+   * A pose-only grab started: suspend this target's physics body, if it has
+   * one, so it follows `setWorldPose` exactly. REQUIRED when grabs are
+   * pose-only (`nativeGrab` off). A target with no body needs nothing.
+   * IWSDK: `beginHold` removes the `PhysicsBody` (`register.ts`,
+   * `physicsBindingFor`).
    */
-  beginHold?(targetId: string): void;
-  /** Resume physics for `targetId` with `release` as its new velocity. */
-  endHold?(targetId: string, release: HoldRelease): void;
+  beginHold(targetId: string): void;
+  /**
+   * The grab ended: resume the body with `release` as its velocity (linear
+   * m/s and angular rad/s, world space; zeros for a synthesized release,
+   * which rests). A target with NO physics body rests where it was released,
+   * as on IWSDK where there is no body to re-add. IWSDK: `endHold` re-adds
+   * the `PhysicsBody` and, for a non-zero velocity, a `PhysicsManipulation`.
+   */
+  endHold(targetId: string, release: HoldRelease): void;
+}
+
+/**
+ * Test-only readbacks a host provides so the host conformance kit
+ * (`nativeInteractionsHostConformanceCases`) can check what the host
+ * actually did. A shipping host may omit them.
+ */
+export interface NativeInteractionsTestHost {
+  /** Put a shown, hit-testable target of `radius` metres at `position`, as the app's scene would. */
+  placeTarget(targetId: string, position: Vec3Tuple, radius: number): void;
+  /** Remove every target `placeTarget` put in. */
+  clearTargets(): void;
+  /** What the host draws for one side now. */
+  presenceShown(side: "left" | "right"): NativePresenceShown | undefined;
+  /** The last release the host received for a target through `endHold`. */
+  lastRelease(targetId: string): HoldRelease | undefined;
+  /** Every cursor disc the host draws now, as world positions. */
+  cursors(): Vec3Tuple[];
 }
 
 /**

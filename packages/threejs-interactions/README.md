@@ -72,7 +72,9 @@ The tree lives on the geometry for as long as the geometry does. The adapter nev
 
 **Register a collider proxy.** Register a low-poly stand-in (a box, a sphere, a simplified hull) as the interactable object, and parent the detailed model to it or move both from the same transform. The proxy is what the ray and the poke test see; the model is what the player sees.
 
-Poke targeting (`hitProximity`) is a sphere test on each registered object's world position and bounding-sphere radius, so it costs the same whatever the mesh.
+Poke targeting (`hitProximity`) is a sphere test on each registered object's world position and bounding-sphere radius, so it costs the same whatever the mesh. A target with no geometry of its own (a bare `Group`) has no bounding sphere to read, so `register(id, object, targetRadius?)` takes an explicit radius for one - default 0.1 m, matching IWSDK's own default for a target registered without one.
+
+`hitRay` and `hitProximity` both drop a target hidden by `visible === false`, on itself or on any ancestor, even though three.js's own `Raycaster` ignores `visible` by design ([issue 14700](https://github.com/mrdoob/three.js/issues/14700)) - the adapter re-applies the rule itself.
 
 ## Peer dependencies
 

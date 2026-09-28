@@ -4,10 +4,10 @@
  * Two fulfilments, chosen by capability negotiation at bind time:
  * - `"poseOnly"` - the behaviour owns the carry: on grab it captures the
  *   offset between the holder's grip and the object, then follows the grip
- *   each frame via `setWorldPose`. On release the object stays where
- *   dropped - ballistics/physics are deliberately the CLIENT's concern
- *   (physics is a property of the object in space, not of the interaction
- *   layer).
+ *   each frame via `setWorldPose`. On a host with no physics the object
+ *   stays where it is dropped. On one with physics the engine still owns
+ *   the simulation; this behaviour only suspends and resumes it (see
+ *   below).
  * - `"native"` - the engine owns carry/throw (e.g. IWSDK grabbables +
  *   physics); the behaviour only mirrors transitions into core events.
  *

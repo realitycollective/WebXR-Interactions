@@ -13,7 +13,7 @@
  * `Object3D`s), so its row exercises the exact classes the three.js row does.
  */
 import { describe, it } from "vitest";
-import { Mesh, Object3D, SphereGeometry } from "three";
+import { Group, Mesh, Object3D, SphereGeometry } from "three";
 import type { Entity, World } from "@iwsdk/core";
 import {
   hitTesterContractCases,
@@ -38,11 +38,12 @@ import {
 } from "@realitycollective/iwsdk-interactions";
 import {
   ThreeHitTester as XRBlocksHitTester,
-  ThreeTransformPort as XRBlocksTransformPort,
+  XRBlocksTransformPort,
 } from "@realitycollective/xrblocks-interactions";
 import { NativeHitTester, NativeTransformPort, type NativeHit } from "@realitycollective/native-interactions";
 import { FakeNode, PHYSICS_MOTION_TYPES } from "../../babylon-interactions/test/helpers.js";
 import { FakeInteractionHost } from "../../native-interactions/test/helpers.js";
+import { FakeRapierRigidBody, RAPIER_BODY_TYPES } from "../../xrblocks-interactions/test/helpers.js";
 import { FakeSession, makeWorld } from "./helpers.js";
 
 /** An entity with just what `IWSDKInteractions.register` and its hit tester read. */
@@ -182,6 +183,16 @@ function threeHitTesterSubject(): HitTesterContractSubject {
         mesh.updateMatrixWorld(true);
         hitTester.register(id, mesh);
       },
+      placeBare(id, position) {
+        const group = new Group();
+        group.position.set(position[0], position[1], position[2]);
+        group.updateMatrixWorld(true);
+        hitTester.register(id, group);
+      },
+      setVisible(id, visible) {
+        const object = hitTester.getObject(id);
+        if (object) object.visible = visible;
+      },
     },
   };
 }
@@ -194,6 +205,12 @@ function babylonHitTesterSubject(): HitTesterContractSubject {
       place(id, position, radius) {
         hitTester.register(id, new FakeNode({ absolutePosition: [...position] }), radius);
       },
+      placeBare(id, position) {
+        hitTester.register(id, new FakeNode({ absolutePosition: [...position] }));
+      },
+      setVisible(id, visible) {
+        hitTester.getNode(id)?.setEnabled?.(visible);
+      },
     },
   };
 }
@@ -205,16 +222,28 @@ function iwsdkHitTesterSubject(): HitTesterContractSubject {
   // queries every frame, reached the same way a private field is reached in
   // any of this repository's structural-fake tests.
   const hitTester = (host as unknown as { hitTester: HitTester }).hitTester;
+  const objects = new Map<string, Object3D>();
   return {
     hitTester,
     driver: {
       place(id, position, radius) {
         const object = new Object3D();
         object.position.set(position[0], position[1], position[2]);
+        objects.set(id, object);
         host.register({ id, behaviours: [] }, fakeEntity(object), {
           addInteractables: false,
           targetRadius: radius,
         });
+      },
+      placeBare(id, position) {
+        const object = new Object3D();
+        object.position.set(position[0], position[1], position[2]);
+        objects.set(id, object);
+        host.register({ id, behaviours: [] }, fakeEntity(object), { addInteractables: false });
+      },
+      setVisible(id, visible) {
+        const object = objects.get(id);
+        if (object) object.visible = visible;
       },
     },
   };
@@ -230,6 +259,16 @@ function xrBlocksHitTesterSubject(): HitTesterContractSubject {
         mesh.position.set(position[0], position[1], position[2]);
         mesh.updateMatrixWorld(true);
         hitTester.register(id, mesh);
+      },
+      placeBare(id, position) {
+        const group = new Group();
+        group.position.set(position[0], position[1], position[2]);
+        group.updateMatrixWorld(true);
+        hitTester.register(id, group);
+      },
+      setVisible(id, visible) {
+        const object = hitTester.getObject(id);
+        if (object) object.visible = visible;
       },
     },
   };
@@ -341,11 +380,27 @@ function babylonTransformPortSubject(): TransformPortContractSubject {
   };
 }
 
+/**
+ * XR Blocks bundles RAPIER, so `XRBlocksTransformPort` gets the
+ * same held/released/reset proof every physics-backed platform does, over a
+ * `FakeRapierRigidBody` - the same reason `babylonTransformPortSubject`
+ * fakes a Havok body instead of depending on one.
+ */
+function xrBlocksTransformPortSubject(): TransformPortContractSubject {
+  const object = objectAtRest();
+  const body = new FakeRapierRigidBody(object);
+  return {
+    port: new XRBlocksTransformPort(object, { rigidBody: body, rigidBodyTypes: RAPIER_BODY_TYPES }),
+    rest: REST_POSE,
+    physics: { step: (dt) => body.step(dt) },
+  };
+}
+
 const transformPortPlatforms: Array<[string, () => TransformPortContractSubject]> = [
   ["threejs", () => ({ port: new ThreeTransformPort(objectAtRest()), rest: REST_POSE })],
   ["babylon", babylonTransformPortSubject],
   ["iwsdk", iwsdkTransformPortSubject],
-  ["xrblocks", () => ({ port: new XRBlocksTransformPort(objectAtRest()), rest: REST_POSE })],
+  ["xrblocks", xrBlocksTransformPortSubject],
   ["native", nativeTransformPortSubject],
 ];
 

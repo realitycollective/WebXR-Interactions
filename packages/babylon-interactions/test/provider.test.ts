@@ -165,6 +165,14 @@ describe("BabylonInputProvider sampling", () => {
     expect(source?.gripPose?.position).toEqual([1, 1, 1]);
   });
 
+  it("gives a controller its ray origin as its index tip, as IWSDK's input rig does", () => {
+    const { xr, provider } = setup();
+    xr.start(new FakeController({ handedness: "right", pointer: new FakeNode({ absolutePosition: [0.3, 1.4, -0.2] }) }));
+    const [source] = provider.sample();
+    expect(source?.kind).toBe("controller");
+    expect(source?.indexTip).toEqual([0.3, 1.4, -0.2]);
+  });
+
   it("reads the index fingertip from the hand-tracking feature", () => {
     const { xr, provider } = setup();
     const tracking = new FakeHandTracking();
@@ -185,6 +193,18 @@ describe("BabylonInputProvider sampling", () => {
     xr.start(new FakeController({ handedness: "right" }));
     const [source] = provider.sample();
     expect(source && "linearVelocity" in source).toBe(false);
+  });
+
+  it("returns nothing while the app is not visible, as IWSDK's provider does", () => {
+    const { xr, provider } = setup();
+    xr.start(new FakeController({ handedness: "right" }));
+    expect(provider.sample().length).toBe(1);
+
+    xr.setVisibility("hidden");
+    expect(provider.sample()).toEqual([]);
+
+    xr.setVisibility("visible");
+    expect(provider.sample().length).toBe(1);
   });
 
   it("re-derives capabilities when a session ends between frames", () => {

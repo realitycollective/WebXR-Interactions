@@ -11,7 +11,9 @@
  *
  * Capabilities are derived from the LIVE session, never from the requested
  * configuration, and are re-published on session start, session end and
- * controller add/remove.
+ * controller add/remove. `sample()` reports no sources at all while the
+ * session exists but is not `"visible"`, the same rule IWSDK's provider
+ * applies.
  */
 import {
   NO_CAPABILITIES,
@@ -256,11 +258,19 @@ export class BabylonInputProvider implements InputProvider {
 
   sample(): readonly InputSourceSnapshot[] {
     this.sampled.clear();
-    if (this.session() === null) {
+    const session = this.session();
+    if (session === null) {
       // A session that ended between frames leaves stale capabilities behind.
       if (this.capabilities.rays) this.refreshCapabilities();
       return this.samplePointer();
     }
+    // A session that exists but is not visible (backgrounded, or the
+    // browser's own "content is obscured" state) reports no sources at all,
+    // the same rule IWSDK's provider applies to `world.visibilityState`.
+    // Babylon's session manager passes the raw `XRSession` through, so its
+    // standard `visibilityState` is read straight off it.
+    const visibilityState = (session as { visibilityState?: string }).visibilityState;
+    if (visibilityState !== undefined && visibilityState !== "visible") return [];
 
     const snapshots: InputSourceSnapshot[] = [];
     for (const controller of this.controllers()) {
@@ -292,6 +302,9 @@ export class BabylonInputProvider implements InputProvider {
       if (gripNode) snapshot.gripPose = nodeWorldPose(gripNode);
       const tip = jointPosition(hand, INDEX_TIP_JOINT);
       if (tip) snapshot.indexTip = tip;
+      // A controller has no fingertip: its index tip is its ray origin, as
+      // IWSDK's input rig makes it, so a controller pokes as a finger does.
+      else if (!controller.inputSource.hand && snapshot.ray) snapshot.indexTip = [...snapshot.ray.origin];
       if ((controller.inputSource.gamepad?.hapticActuators?.length ?? 0) > 0) {
         snapshot.hapticsAvailable = true;
       }

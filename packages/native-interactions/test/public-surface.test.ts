@@ -1,7 +1,8 @@
 /**
  * A platform adapter only implements the core's contracts. Its public
  * surface matches the other adapters: the core, the provider, hit tester,
- * transform port and setup entry point. Slice reading and tuple copying stay
+ * transform port and setup entry point, plus the host conformance kit a
+ * native app runs on its device. Slice reading and tuple copying stay
  * internal.
  */
 import { describe, expect, it } from "vitest";
@@ -17,6 +18,7 @@ describe("native-interactions public surface", () => {
       "NativeInteractions",
       "NativeTransformPort",
       "createNativeInteractions",
+      "nativeInteractionsHostConformanceCases",
     ]);
   });
 });

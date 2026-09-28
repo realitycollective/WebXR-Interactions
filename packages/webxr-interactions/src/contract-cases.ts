@@ -36,6 +36,25 @@ export interface HitTesterContractDriver {
    * however the platform registers a target - a mesh, a node, an entity.
    */
   place(id: string, position: Vec3Tuple, radius: number): void;
+  /**
+   * Register a target at `position` with NO declared radius - a bare node
+   * with no geometry of its own - on a platform that can register one
+   * without a radius (three.js, XR Blocks, Babylon, IWSDK). `hitProximity`
+   * must then treat it as a 0.1 m sphere, `ports.ts`'s documented default.
+   * Leave this out on a platform whose registration always takes an
+   * explicit radius (native); the case that needs it skips without running.
+   */
+  placeBare?(id: string, position: Vec3Tuple): void;
+  /**
+   * Hide, or show again, a placed target using the platform's own ordinary
+   * visibility flag alone - three.js `Object3D.visible`, Babylon
+   * `isVisible`/`setEnabled`, and so on - never by unregistering it. A hit
+   * tester must never answer with a target hidden this way, even on an
+   * engine whose own raycast ignores that flag by design (three.js's
+   * `Raycaster`; see `ThreeHitTester.hitRay`'s own comment). Leave this out
+   * on a platform with no such flag to toggle; the case that needs it skips.
+   */
+  setVisible?(id: string, visible: boolean): void;
 }
 
 /** The tester under test, plus the means of putting targets into its scene. */
@@ -75,6 +94,9 @@ const AWAY_RAY: RayTuple = { origin: [0, 0, 0], direction: [0, 0, 1] };
  * the same point when a tester has no radius-shaped slack, and this is the
  * tolerance for testers that do.
  */
+/** A surface distance is exact up to 1 mm, the tolerance the master row states. */
+const SURFACE_EPS = 1e-3;
+
 function slack(radius: number): number {
   return radius + 0.05;
 }
@@ -122,6 +144,45 @@ const HIT_TESTER_CASES: readonly HitTesterContractCase[] = [
     },
   },
   {
+    name: "hitProximity reports the distance to the target's SURFACE, clamped at zero",
+    run({ hitTester, driver }) {
+      // The master row: a point 3 cm outside a 10 cm target reports 0.03, not
+      // 0.13. A tester that reports the distance to the centre removes every
+      // near interaction, because no fingertip is ever within 5 cm of a
+      // target's centre.
+      driver.place("target", [0, 0, -2], 0.1);
+      const outside = hitTester.hitProximity([0.13, 0, -2], 0.5);
+      assert(outside !== null, "a point 3 cm outside a 10 cm target must be found within 0.5 m");
+      assert(
+        closeTo(outside.distance, 0.03, SURFACE_EPS),
+        `distance must be to the surface, 0.03 within 1 mm, got ${outside.distance}`,
+      );
+      const inside = hitTester.hitProximity([0.02, 0, -2], 0.5);
+      assert(inside !== null && inside.distance === 0, `a point inside the target is at distance 0, got ${inside?.distance}`);
+    },
+  },
+  {
+    name: "hitProximity misses a target whose surface is farther than the query radius",
+    run({ hitTester, driver }) {
+      driver.place("target", [0, 0, -2], 0.1);
+      assert(
+        hitTester.hitProximity([0.13, 0, -2], 0.02) === null,
+        "a surface 3 cm away is outside a 2 cm query and must not be found",
+      );
+      assert(
+        hitTester.hitProximity([0.13, 0, -2], 0.04) !== null,
+        "a surface 3 cm away is inside a 4 cm query and must be found",
+      );
+    },
+  },
+  {
+    name: "a ray that passes a target farther than its radius misses it",
+    run({ hitTester, driver }) {
+      driver.place("target", [0.5, 0, -2], 0.1);
+      assert(hitTester.hitRay(DOWN_RAY) === null, "a ray 0.5 m from a 0.1 m target must miss it");
+    },
+  },
+  {
     name: "with two targets on one ray, the nearer one wins",
     run({ hitTester, driver }) {
       const radius = 0.1;
@@ -131,6 +192,46 @@ const HIT_TESTER_CASES: readonly HitTesterContractCase[] = [
       assert(hit !== null, "a ray through two targets must not miss");
       assert(hit.interactableId === "near", `the nearer target must win, got "${hit.interactableId}"`);
       assert(closeTo(hit.distance, 1, slack(radius)), `distance must be close to 1, got ${hit.distance}`);
+    },
+  },
+  {
+    name: "hitProximity treats a target with no declared radius as a 0.1 m sphere, when the driver can register one",
+    run({ hitTester, driver }) {
+      if (!driver.placeBare) return;
+      driver.placeBare("bare", [0, 0, -2]);
+      // 0.12 m from the centre is 0.02 m outside a 0.1 m default radius -
+      // found within a 0.05 m query, and NOT the 0.12 m a zero-radius
+      // reading would report.
+      const found = hitTester.hitProximity([0.12, 0, -2], 0.05);
+      assert(
+        found !== null,
+        "a point 0.12 m from a bare target's centre must be found within a 0.05 m query, given the 0.1 m default radius",
+      );
+      assert(
+        closeTo(found.distance, 0.02, SURFACE_EPS),
+        `distance must be to the default 0.1 m surface, 0.02 within 1 mm, got ${found.distance}`,
+      );
+    },
+  },
+  {
+    name: "an object hidden by visible alone is never hit, when the driver can toggle it",
+    run({ hitTester, driver }) {
+      if (!driver.setVisible) return;
+      driver.place("target", [0, 0, -2], 0.15);
+      driver.setVisible("target", false);
+      assert(
+        hitTester.hitRay(DOWN_RAY) === null,
+        "a ray must not hit a target hidden by visible alone",
+      );
+      assert(
+        hitTester.hitProximity([0, 0, -2], 0.5) === null,
+        "hitProximity must not find a target hidden by visible alone",
+      );
+      driver.setVisible("target", true);
+      assert(
+        hitTester.hitRay(DOWN_RAY) !== null,
+        "showing the target again must restore the hit",
+      );
     },
   },
   {

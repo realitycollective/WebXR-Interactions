@@ -7,23 +7,31 @@
  * into them afterwards - exactly what a native host that reuses its own
  * sample buffers would do. That is the scenario `NativeInputProvider` has
  * to survive.
+ *
+ * The input fake reports FACTS, sources and signals, as a native app now
+ * does; it never reports capabilities, which `NativeInputProvider` derives.
+ * `ReferenceInteractionHost` is a geometrically correct host that also
+ * implements the test readbacks, the smoke target for the conformance kit.
  */
-import { NO_CAPABILITIES } from "@realitycollective/webxr-input";
 import type {
-  Handedness,
   HeadPose,
-  InputCapabilities,
   InputHitHint,
   InputSourceSnapshot,
   PoseTuple,
-  PresenceModality,
   QuatTuple,
   RayTuple,
   Unsubscribe,
   Vec3Tuple,
 } from "@realitycollective/webxr-input";
 import type { HoldRelease } from "@realitycollective/webxr-interactions";
-import type { NativeHit, NativeInputHost, NativeInteractionHost } from "@realitycollective/native-interactions";
+import type {
+  NativeHit,
+  NativeInputFacts,
+  NativeInputHost,
+  NativeInteractionHost,
+  NativeInteractionsTestHost,
+  NativePresenceShown,
+} from "@realitycollective/native-interactions";
 
 export interface FakeInputHostCapable {
   headPose?: boolean;
@@ -34,9 +42,12 @@ export interface FakeInputHostCapable {
 
 export class FakeInputHost implements NativeInputHost {
   private live = false;
-  private readonly presenceCapable: boolean;
-  private readonly capsListeners = new Set<(c: InputCapabilities) => void>();
+  private readonly factsListeners = new Set<() => void>();
   private readonly sourceListeners = new Set<() => void>();
+  /** The session's hand-tracking fact. */
+  handTracking = false;
+  /** Sources reported in place of the pooled one while set. */
+  sources: InputSourceSnapshot[] | null = null;
 
   /** One pooled snapshot, reused (and mutated) across calls - see the file header. */
   private readonly pooled: InputSourceSnapshot = {
@@ -51,18 +62,19 @@ export class FakeInputHost implements NativeInputHost {
   readonly hints: InputHitHint[] = [];
   headPoseValue: HeadPose = { position: [0, 1.6, 0], quaternion: [0, 0, 0, 1] };
   readonly pulses: Array<[string, number, number]> = [];
-  readonly presenceVisible: Array<[Handedness | "all", boolean]> = [];
-  readonly presenceModality: PresenceModality[] = [];
-  presenceReport = true;
+  /** Every `applyPresence` call, in order. */
+  readonly presenceCalls: Array<["left" | "right", NativePresenceShown]> = [];
+  /** What each side draws now. */
+  readonly shown: Partial<Record<"left" | "right", NativePresenceShown>> = {};
+  /** Cursor discs drawn, which a correct host keeps whatever presence says. */
+  cursorPoints: Vec3Tuple[] = [];
 
   getHeadPose?: () => HeadPose;
   sampleHints?: () => readonly InputHitHint[];
   pulse?: (sourceId: string, intensity: number, durationMs: number) => boolean;
-  setPresenceVisible?: (target: Handedness | "all", visible: boolean) => boolean;
-  setPresenceModality?: (mode: PresenceModality) => boolean;
+  applyPresence?: (side: "left" | "right", shown: NativePresenceShown) => void;
 
   constructor(capable: FakeInputHostCapable = {}) {
-    this.presenceCapable = !!capable.presence;
     if (capable.headPose) this.getHeadPose = () => this.headPoseValue;
     if (capable.hints) this.sampleHints = () => this.hints;
     if (capable.pulse) {
@@ -72,29 +84,20 @@ export class FakeInputHost implements NativeInputHost {
       };
     }
     if (capable.presence) {
-      this.setPresenceVisible = (target, visible) => {
-        this.presenceVisible.push([target, visible]);
-        return this.presenceReport;
-      };
-      this.setPresenceModality = (mode) => {
-        this.presenceModality.push(mode);
-        return true;
+      this.applyPresence = (side, shown) => {
+        this.presenceCalls.push([side, shown]);
+        this.shown[side] = { ...shown };
       };
     }
   }
 
-  /** Live capabilities, derived from the session flag and the fixed presence flag. */
-  getCapabilities(): InputCapabilities {
-    return {
-      ...NO_CAPABILITIES,
-      presence: this.presenceCapable,
-      ...(this.live ? { rays: true, headPose: true, grabs: "poseOnly" as const } : {}),
-    };
+  getFacts(): NativeInputFacts {
+    return { immersive: this.live, focused: this.live, handTracking: this.handTracking };
   }
 
-  onCapabilitiesChanged(listener: (c: InputCapabilities) => void): Unsubscribe {
-    this.capsListeners.add(listener);
-    return () => this.capsListeners.delete(listener);
+  onFactsChanged(listener: () => void): Unsubscribe {
+    this.factsListeners.add(listener);
+    return () => this.factsListeners.delete(listener);
   }
 
   onSourcesChanged(listener: () => void): Unsubscribe {
@@ -103,7 +106,8 @@ export class FakeInputHost implements NativeInputHost {
   }
 
   sample(): readonly InputSourceSnapshot[] {
-    return this.live ? [this.pooled] : [];
+    if (!this.live) return [];
+    return this.sources ?? [this.pooled];
   }
 
   /** Mutate the pooled snapshot's fields and tuples in place, as a reused buffer would be. */
@@ -115,23 +119,28 @@ export class FakeInputHost implements NativeInputHost {
     ray.direction[2] = direction[2];
   }
 
+  /** Replace the reported sources and signal a source change. */
+  setSources(sources: InputSourceSnapshot[] | null): void {
+    this.sources = sources;
+    this.notifySources();
+  }
+
   /** Driver hook: `inputProviderContractCases()` calls this on cases that need a session. */
   enterSession(): void {
     this.live = true;
-    this.notifyCaps();
+    this.notifyFacts();
     this.notifySources();
   }
 
   /** Driver hook, the other half of a session cycle. */
   exitSession(): void {
     this.live = false;
-    this.notifyCaps();
+    this.notifyFacts();
     this.notifySources();
   }
 
-  private notifyCaps(): void {
-    const next = this.getCapabilities();
-    for (const listener of [...this.capsListeners]) listener(next);
+  notifyFacts(): void {
+    for (const listener of [...this.factsListeners]) listener();
   }
 
   private notifySources(): void {
@@ -142,7 +151,7 @@ export class FakeInputHost implements NativeInputHost {
 export interface FakeInteractionHostCapable {
   setWorldPose?: boolean;
   setEffect?: boolean;
-  /** Wires beginHold/endHold and a fake gravity-driven `step()`, the same shape `TransformPortPhysicsDriver` expects. */
+  /** Wires a fake gravity-driven `step()` that the hold methods suspend, the shape `TransformPortPhysicsDriver` expects. */
   physics?: boolean;
 }
 
@@ -165,11 +174,11 @@ export class FakeInteractionHost implements NativeInteractionHost {
   readonly setEffectCalls: Array<[string, { scale?: number; emissive?: number }]> = [];
   readonly beginHoldCalls: string[] = [];
   readonly endHoldCalls: Array<[string, HoldRelease]> = [];
+  /** Every `setTargetRadius` call, in order. */
+  readonly radiusCalls: Array<[string, number]> = [];
 
   setWorldPose?: (targetId: string, pose: PoseTuple) => void;
   setEffect?: (targetId: string, effect: { scale?: number; emissive?: number }) => void;
-  beginHold?: (targetId: string) => void;
-  endHold?: (targetId: string, release: HoldRelease) => void;
 
   constructor(capable: FakeInteractionHostCapable = {}) {
     this.physicsCapable = !!capable.physics;
@@ -185,17 +194,27 @@ export class FakeInteractionHost implements NativeInteractionHost {
         this.setEffectCalls.push([targetId, effect]);
       };
     }
-    if (capable.physics) {
-      this.beginHold = (targetId) => {
-        this.beginHoldCalls.push(targetId);
-        this.heldTargets.add(targetId);
-      };
-      this.endHold = (targetId, release) => {
-        this.endHoldCalls.push([targetId, release]);
-        this.heldTargets.delete(targetId);
-        this.velocities.set(targetId, [...release.linearVelocity]);
-      };
-    }
+  }
+
+  /**
+   * Suspend the body. Always recorded; the object is held only when this
+   * fake has physics. A host without physics implements both hold methods
+   * and lets the object rest, as the contract states.
+   */
+  beginHold(targetId: string): void {
+    this.beginHoldCalls.push(targetId);
+    if (this.physicsCapable) this.heldTargets.add(targetId);
+  }
+
+  endHold(targetId: string, release: HoldRelease): void {
+    this.endHoldCalls.push([targetId, release]);
+    if (!this.physicsCapable) return;
+    this.heldTargets.delete(targetId);
+    this.velocities.set(targetId, [...release.linearVelocity]);
+  }
+
+  setTargetRadius(targetId: string, radius: number): void {
+    this.radiusCalls.push([targetId, radius]);
   }
 
   /**
@@ -275,5 +294,89 @@ export class FakeInteractionHost implements NativeInteractionHost {
 
   setLocalRotation(targetId: string, quaternion: QuatTuple): void {
     this.setLocalRotationCalls.push([targetId, quaternion]);
+  }
+}
+
+/**
+ * A correct host, geometrically: targets are spheres, `hitRay` is IWSDK's
+ * point-to-line test and `hitProximity` its surface distance, radii follow
+ * `setTargetRadius`, and every test readback is implemented. The smoke
+ * target for the host conformance kit.
+ */
+export class ReferenceInteractionHost extends FakeInteractionHost implements NativeInteractionsTestHost {
+  private readonly targets = new Map<string, { position: Vec3Tuple; radius: number }>();
+  private readonly releases = new Map<string, HoldRelease>();
+  private readonly input: FakeInputHost | undefined;
+
+  constructor(input?: FakeInputHost) {
+    super();
+    this.input = input;
+  }
+
+  placeTarget(targetId: string, position: Vec3Tuple, radius: number): void {
+    this.targets.set(targetId, { position: [...position], radius });
+  }
+
+  clearTargets(): void {
+    this.targets.clear();
+  }
+
+  override setTargetRadius(targetId: string, radius: number): void {
+    super.setTargetRadius(targetId, radius);
+    const target = this.targets.get(targetId);
+    if (target) target.radius = radius;
+  }
+
+  override endHold(targetId: string, release: HoldRelease): void {
+    super.endHold(targetId, release);
+    this.releases.set(targetId, {
+      linearVelocity: [...release.linearVelocity],
+      angularVelocity: [...release.angularVelocity],
+    });
+  }
+
+  lastRelease(targetId: string): HoldRelease | undefined {
+    return this.releases.get(targetId);
+  }
+
+  presenceShown(side: "left" | "right"): NativePresenceShown | undefined {
+    return this.input?.shown[side];
+  }
+
+  cursors(): Vec3Tuple[] {
+    return (this.input?.cursorPoints ?? []).map((point) => [...point] as Vec3Tuple);
+  }
+
+  override hitRay(ray: RayTuple): NativeHit | null {
+    let best: NativeHit | null = null;
+    for (const [id, target] of this.targets) {
+      const t =
+        (target.position[0] - ray.origin[0]) * ray.direction[0] +
+        (target.position[1] - ray.origin[1]) * ray.direction[1] +
+        (target.position[2] - ray.origin[2]) * ray.direction[2];
+      if (t <= 0) continue;
+      const miss = Math.hypot(
+        ray.origin[0] + ray.direction[0] * t - target.position[0],
+        ray.origin[1] + ray.direction[1] * t - target.position[1],
+        ray.origin[2] + ray.direction[2] * t - target.position[2],
+      );
+      if (miss <= target.radius && (best === null || t < best.distance)) {
+        best = { targetId: id, distance: t, point: [...target.position] };
+      }
+    }
+    return best;
+  }
+
+  override hitProximity(point: Vec3Tuple, radius: number): NativeHit | null {
+    let best: NativeHit | null = null;
+    for (const [id, target] of this.targets) {
+      const surface =
+        Math.hypot(target.position[0] - point[0], target.position[1] - point[1], target.position[2] - point[2]) -
+        target.radius;
+      if (surface <= radius && (best === null || surface < best.distance)) {
+        best = { targetId: id, distance: Math.max(0, surface), point: [...target.position] };
+      }
+    }
+    return best;
   }
 }
