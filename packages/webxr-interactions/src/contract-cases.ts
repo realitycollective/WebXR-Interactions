@@ -97,6 +97,10 @@ const AWAY_RAY: RayTuple = { origin: [0, 0, 0], direction: [0, 0, 1] };
 /** A surface distance is exact up to 1 mm, the tolerance the master row states. */
 const SURFACE_EPS = 1e-3;
 
+function degrees(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
 function slack(radius: number): number {
   return radius + 0.05;
 }
@@ -254,6 +258,64 @@ const HIT_TESTER_CASES: readonly HitTesterContractCase[] = [
           `writing to a returned point must not change the next ${label} answer`,
         );
       }
+    },
+  },
+  {
+    name: "hitCone, when present, answers a ray that reaches a target with that target at angular distance zero",
+    run({ hitTester, driver }) {
+      if (!hitTester.hitCone) return;
+      driver.place("cone-direct", [0, 0, -2], 0.1);
+      const hit = hitTester.hitCone(DOWN_RAY, degrees(5), 30);
+      assert(hit !== null, "hitCone answered null for a target on the ray");
+      assert(hit.interactableId === "cone-direct", `hitCone named "${hit.interactableId}", expected "cone-direct"`);
+      assert(hit.distance > 0 && hit.distance <= 2 + slack(0.1), `hitCone reported distance ${String(hit.distance)}, expected about 2`);
+      assert(dist(hit.point, [0, 0, -2]) <= slack(0.1), "hitCone's point is not on the target");
+    },
+  },
+  {
+    name: "hitCone, when present, finds a target inside the cone that the ray itself misses",
+    run({ hitTester, driver }) {
+      if (!hitTester.hitCone) return;
+      // 2 m ahead and 0.2 m to the side: its silhouette (radius 0.1) is about
+      // 2.9 degrees off axis, inside a 5 degree cone, outside the ray.
+      driver.place("cone-near", [0.2, 0, -2], 0.1);
+      assert(hitTester.hitRay(DOWN_RAY) === null, "the ray itself must miss the offset target");
+      const hit = hitTester.hitCone(DOWN_RAY, degrees(5), 30);
+      assert(hit !== null && hit.interactableId === "cone-near", "hitCone did not find the target inside the cone");
+      assert(dist(hit.point, [0.2, 0, -2]) <= slack(0.1), "hitCone's point is not on the target");
+    },
+  },
+  {
+    name: "hitCone, when present, ignores a target outside the cone and one beyond the length",
+    run({ hitTester, driver }) {
+      if (!hitTester.hitCone) return;
+      driver.place("cone-wide", [0.5, 0, -2], 0.1);
+      driver.place("cone-far", [0, 0, -40], 0.1);
+      assert(hitTester.hitCone(DOWN_RAY, degrees(5), 30) === null, "hitCone answered with a target outside the cone or beyond the length");
+    },
+  },
+  {
+    name: "hitCone, when present, prefers the target nearer the axis, and the nearer of two on the axis",
+    run({ hitTester, driver }) {
+      if (!hitTester.hitCone) return;
+      driver.place("cone-off", [0.15, 0, -2], 0.05);
+      driver.place("cone-on", [0.05, 0, -3], 0.05);
+      const byAngle = hitTester.hitCone(DOWN_RAY, degrees(8), 30);
+      assert(byAngle !== null && byAngle.interactableId === "cone-on", "hitCone did not prefer the target nearer the axis");
+      driver.place("cone-nearer", [0, 0, -1], 0.05);
+      const nearer = hitTester.hitCone(DOWN_RAY, degrees(8), 30);
+      assert(nearer !== null && nearer.interactableId === "cone-nearer", "with two targets on the axis, hitCone did not prefer the nearer");
+    },
+  },
+  {
+    name: "hitCone, when present, never answers with a target hidden by visible alone, when the driver can toggle it",
+    run({ hitTester, driver }) {
+      if (!hitTester.hitCone || !driver.setVisible) return;
+      driver.place("cone-hidden", [0, 0, -2], 0.1);
+      driver.setVisible("cone-hidden", false);
+      assert(hitTester.hitCone(DOWN_RAY, degrees(5), 30) === null, "hitCone answered with a hidden target");
+      driver.setVisible("cone-hidden", true);
+      assert(hitTester.hitCone(DOWN_RAY, degrees(5), 30)?.interactableId === "cone-hidden", "hitCone lost the target after it was shown again");
     },
   },
 ];
@@ -524,6 +586,10 @@ const TRANSFORM_PORT_CASES: readonly TransformPortContractCase[] = [
 
 function assert(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function dist(a: Vec3Tuple, b: Vec3Tuple): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
 function closeTo(a: number, b: number, eps: number): boolean {

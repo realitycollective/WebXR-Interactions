@@ -33,11 +33,14 @@ import { Vector3 } from "three";
 import type { InputHitHint, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
   InteractionRuntime,
+  coneHitForSpheres,
   type DwellConfig,
+  type EyeGazeOptions,
   type HitTester,
   type HoldRelease,
   type InteractableDescriptor,
   type InteractableHit,
+  type SphereTarget,
 } from "@realitycollective/webxr-interactions";
 import { IWSDKInputProvider, type IWSDKProviderOptions } from "./provider.js";
 import { IWSDKTransformPort, type IWSDKPhysicsBinding } from "./transform-port.js";
@@ -123,6 +126,17 @@ class EntityHitTester implements HitTester {
     return best;
   }
 
+  /** The eye-gaze cone over the same spheres (`ports.ts`, `hitCone`): the core's `coneHitForSpheres`. */
+  hitCone(ray: RayTuple, halfAngle: number, maxLength: number): InteractableHit | null {
+    const spheres: SphereTarget[] = [];
+    for (const entry of this.entries.values()) {
+      if (!this.resolve(entry)) continue;
+      spheres.push({ id: entry.id, center: [entry.x, entry.y, entry.z], radius: entry.radius });
+    }
+    const hit = coneHitForSpheres(ray, spheres, halfAngle, maxLength);
+    return hit ? { interactableId: hit.interactableId, distance: hit.distance, point: hit.point } : null;
+  }
+
   /**
    * Bring the entry's cached world position up to this frame. False when
    * the entity has no object or a hidden one, which no query targets.
@@ -199,6 +213,8 @@ function physicsBindingFor(entity: Entity, world: World): IWSDKPhysicsBinding | 
 
 export interface IWSDKRegisterOptions extends IWSDKProviderOptions {
   dwellDefaults?: DwellConfig;
+  /** Eye-gaze tuning for the runtime's targeting (cone, dwell window, suppression, follow). Defaults are IWSDK 1.0.0's. */
+  eyeGaze?: EyeGazeOptions;
 }
 
 export interface IWSDKRegisterEntityOptions {
@@ -223,6 +239,7 @@ export class IWSDKInteractions {
       provider: this.provider,
       hitTester: this.hitTester,
       ...(options.dwellDefaults ? { dwellDefaults: options.dwellDefaults } : {}),
+      ...(options.eyeGaze ? { eyeGaze: options.eyeGaze } : {}),
     });
   }
 
@@ -286,6 +303,8 @@ export class IWSDKInteractions {
     this.provider.setNativeGrabbing("left", leftGrabbing);
     this.provider.setNativeGrabbing("right", rightGrabbing);
     this.provider.setHints(hints);
+    // The provider's eye-gaze filter and grace integrate over the same step.
+    this.provider.setFrameDelta(delta);
     // One world-position resolution per entity for the five queries the
     // runtime is about to make.
     this.hitTester.beginFrame();

@@ -40,14 +40,20 @@ export class FakeSignal<T> {
   }
 }
 
+/** The slice of an `XRInputSource` the provider reads: a hand, and the target-ray mode (`"gaze"` marks the eye-gaze source). */
+export interface FakeInputSource {
+  hand?: unknown;
+  targetRayMode?: string;
+}
+
 export interface FakeSessionOptions {
   enabledFeatures?: string[];
-  inputSources?: Array<{ hand?: unknown }>;
+  inputSources?: FakeInputSource[];
 }
 
 export class FakeSession {
   readonly enabledFeatures: string[];
-  readonly inputSources: Array<{ hand?: unknown }>;
+  readonly inputSources: FakeInputSource[];
   readonly listeners = new Map<string, Set<(event: unknown) => void>>();
 
   constructor(options: FakeSessionOptions = {}) {
@@ -154,11 +160,19 @@ export function fakeVisualAdapters(): {
   };
 }
 
+/** IWSDK's `XROrigin` slice the provider reads for eye gaze: the sampled eye pose and its validity. */
+export interface FakeXROrigin {
+  eyeSpace: Object3D;
+  gazeOrigin: "tracked" | "none";
+}
+
 export interface FakeWorldOptions {
   session?: FakeSession | null;
   visibility?: string;
   gamepads?: Partial<Record<Side, FakeGamepad>>;
   visualAdapters?: FakeVisualAdapters | undefined;
+  /** Give the rig an `xrOrigin`; `tracked` sets `gazeOrigin`. Absent, the rig has no eye space, as a 0.5.x rig had none. */
+  gaze?: { tracked: boolean };
 }
 
 export interface FakeWorld {
@@ -170,7 +184,13 @@ export interface FakeWorld {
     indexTipSpaces: Record<Side, { object3D: Object3D | null }>;
     head: { object3D: Object3D | null };
   };
-  input: { xr: { gamepads: Partial<Record<Side, FakeGamepad>>; visualAdapters?: FakeVisualAdapters } };
+  input: {
+    xr: {
+      gamepads: Partial<Record<Side, FakeGamepad>>;
+      visualAdapters?: FakeVisualAdapters;
+      xrOrigin?: FakeXROrigin;
+    };
+  };
   registerSystem(system: unknown): void;
   registeredSystems: unknown[];
 }
@@ -179,6 +199,14 @@ const spacePair = () => ({
   left: { object3D: new Object3D() as Object3D | null },
   right: { object3D: new Object3D() as Object3D | null },
 });
+
+/** An eye space at a position, looking down -Z, matrices ready to read. */
+function eyeSpaceAt(x: number, y: number, z: number): Object3D {
+  const eye = new Object3D();
+  eye.position.set(x, y, z);
+  eye.updateMatrixWorld(true);
+  return eye;
+}
 
 export function makeWorld(options: FakeWorldOptions = {}): FakeWorld {
   const registeredSystems: unknown[] = [];
@@ -195,6 +223,9 @@ export function makeWorld(options: FakeWorldOptions = {}): FakeWorld {
       xr: {
         gamepads: options.gamepads ?? {},
         ...(options.visualAdapters ? { visualAdapters: options.visualAdapters } : {}),
+        ...(options.gaze
+          ? { xrOrigin: { eyeSpace: eyeSpaceAt(0, 1.6, 0), gazeOrigin: options.gaze.tracked ? "tracked" : "none" } as FakeXROrigin }
+          : {}),
       },
     },
     registerSystem(system: unknown) {

@@ -31,7 +31,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-input": "^0.1.4"
+    "@realitycollective/webxr-input": "^0.1.7-preview.0"
   },
   "repository": {
     "type": "git",

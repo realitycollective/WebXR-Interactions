@@ -237,6 +237,18 @@ export interface BabylonXRExperienceLike {
 /** The name Babylon registers hand tracking under in the features manager. */
 export const HAND_TRACKING_FEATURE = "xr-hand-tracking";
 
+/** The name Babylon registers eye tracking under in the features manager (`WebXREyeTracking.Name`). */
+export const EYE_TRACKING_FEATURE = "xr-eye-tracking";
+
+/**
+ * Structural slice of `WebXREyeTracking`: `isEyeGazeValid` says the runtime
+ * posed the gaze this frame, `getEyeGaze()` is the gaze ray, world space.
+ */
+export interface BabylonEyeTrackingLike {
+  isEyeGazeValid?: boolean;
+  getEyeGaze(): BabylonRayLike | null | undefined;
+}
+
 /** Index fingertip joint, as WebXR and Babylon both spell it. */
 export const INDEX_TIP_JOINT = "index-finger-tip";
 

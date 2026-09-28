@@ -23,7 +23,10 @@ import {
   type WebXRManager,
 } from "three";
 import {
+  EyeGazeInput,
   NO_CAPABILITIES,
+  type EyeGazeFrame,
+  type EyeGazeOptions,
   type Handedness,
   type HeadPose,
   type InputCapabilities,
@@ -33,6 +36,9 @@ import {
   type PresenceModality,
   type Unsubscribe,
 } from "@realitycollective/webxr-input";
+
+/** The seconds a sample integrates over until the host reports the real delta. */
+const DEFAULT_FRAME_SECONDS = 1 / 60;
 
 export interface WebXRProviderContext {
   /** three.js `renderer.xr` (or anything with the same session surface). */
@@ -62,6 +68,11 @@ export interface WebXRProviderContext {
    * use right-drag to look.
    */
   desktopSqueezeButton?: "left" | "right" | "none";
+  /**
+   * Tuning for the eye-gaze rule this provider applies (the filter, the
+   * tracking-loss grace). Defaults are IWSDK 1.0.0's (`EYE_GAZE_DEFAULTS`).
+   */
+  eyeGaze?: EyeGazeOptions;
 }
 
 interface SelectState {
@@ -84,6 +95,8 @@ export class WebXRInputProvider implements InputProvider {
   private readonly visuals = new Map<"left" | "right", Object3D>();
   private boundSession: XRSession | null = null;
   private readonly sessionHandlers: Array<[string, EventListener]> = [];
+  private readonly eyeGaze: EyeGazeInput;
+  private frameSeconds = DEFAULT_FRAME_SECONDS;
 
   // Desktop pointer state.
   private mouseDown = false;
@@ -106,6 +119,7 @@ export class WebXRInputProvider implements InputProvider {
     this.gripDistance = context.desktopGripDistance ?? DEFAULT_DESKTOP_GRIP_DISTANCE;
     // Read before attachDom - it decides whether to claim the context menu.
     this.squeezeButton = context.desktopSqueezeButton ?? "left";
+    this.eyeGaze = new EyeGazeInput(context.eyeGaze);
     this.capabilities = { ...NO_CAPABILITIES, headPose: true, gaze: true };
     this.detachDom = this.attachDom(context.domElement);
     this.refreshCapabilities();
@@ -229,7 +243,10 @@ export class WebXRInputProvider implements InputProvider {
       presence: this.visuals.size > 0,
     };
     if (session) {
+      // IWSDK's `findGazeSource`: a source whose targetRayMode is "gaze".
+      next.eyeGaze = this.gazeSource(session) !== null;
       for (const source of session.inputSources) {
+        if (source.targetRayMode === "gaze") continue;
         if (source.targetRaySpace) next.rays = true;
         if (source.gripSpace || source.hand) next.grabs = "poseOnly";
         if (source.hand) {
@@ -264,12 +281,30 @@ export class WebXRInputProvider implements InputProvider {
     return () => this.sourceListeners.delete(listener);
   }
 
+  /** The seconds the next `sample()` integrates over (the eye-gaze filter and grace); the host sets it each frame. */
+  setFrameDelta(seconds: number): void {
+    this.frameSeconds = seconds;
+  }
+
+  /** IWSDK's `findGazeSource`: `inputSources` first, then a runtime's `trackedSources`. */
+  private gazeSource(session: XRSession): XRInputSource | null {
+    for (const source of session.inputSources) {
+      if (source.targetRayMode === "gaze") return source;
+    }
+    const tracked = (session as XRSession & { trackedSources?: Iterable<XRInputSource> }).trackedSources;
+    for (const source of tracked ?? []) {
+      if (source.targetRayMode === "gaze") return source;
+    }
+    return null;
+  }
+
   sample(): readonly InputSourceSnapshot[] {
     const session = this.syncSession();
     // The session-null path also re-derives capabilities when a session
     // just ended between frames.
     if (!session) {
       if (this.capabilities.rays) this.refreshCapabilities();
+      this.eyeGaze.reset();
       return this.sampleDesktop();
     }
 
@@ -278,15 +313,21 @@ export class WebXRInputProvider implements InputProvider {
     // the same rule IWSDK's provider applies to `world.visibilityState`. A
     // session with no `visibilityState` at all (a minimal fake) is treated
     // as visible - every real `XRSession` carries the field.
-    if (session.visibilityState !== undefined && session.visibilityState !== "visible") return [];
+    if (session.visibilityState !== undefined && session.visibilityState !== "visible") {
+      this.eyeGaze.reset();
+      return [];
+    }
 
     const frame = this.context.xr.getFrame();
     const referenceSpace = this.context.xr.getReferenceSpace();
     if (!frame || !referenceSpace) return [];
 
     const snapshots: InputSourceSnapshot[] = [];
+    const rayPoses: EyeGazeFrame["rayPoses"] = {};
     let index = 0;
     for (const source of session.inputSources) {
+      // The gaze source is not a hand or controller: it is read below.
+      if (source.targetRayMode === "gaze") continue;
       const state = this.selectState(source);
       const id = `${source.handedness}-${source.hand ? "hand" : "controller"}-${index++}`;
       const snapshot: InputSourceSnapshot = {
@@ -310,6 +351,10 @@ export class WebXRInputProvider implements InputProvider {
           origin: [p.x, p.y, p.z],
           direction: [this.v.x, this.v.y, this.v.z],
         };
+        // The ray-space pose itself, for the eye-gaze selector.
+        if (snapshot.handedness !== "none" && !rayPoses[snapshot.handedness]) {
+          rayPoses[snapshot.handedness] = { position: [p.x, p.y, p.z], quaternion: [o.x, o.y, o.z, o.w] };
+        }
       }
       if (source.gripSpace) {
         const gripPose = frame.getPose(source.gripSpace, referenceSpace);
@@ -345,7 +390,26 @@ export class WebXRInputProvider implements InputProvider {
       }
       snapshots.push(snapshot);
     }
-    return snapshots;
+    if (!this.capabilities.eyeGaze) return snapshots;
+    // The eye-gaze rule over the gaze source's pose this frame: IWSDK's
+    // `GazePointer.sampleGazePose`, then `EyeGazeInput` for the rest.
+    const gazeSource = this.gazeSource(session);
+    let pose: PoseTuple | null = null;
+    if (gazeSource) {
+      let gazePose: XRPose | null | undefined = null;
+      try {
+        gazePose = frame.getPose(gazeSource.targetRaySpace, referenceSpace);
+      } catch {
+        // A runtime may throw for an unposed gaze space: tracked gaze is unavailable this frame.
+        gazePose = null;
+      }
+      if (gazePose) {
+        const p = gazePose.transform.position;
+        const o = gazePose.transform.orientation;
+        pose = { position: [p.x, p.y, p.z], quaternion: [o.x, o.y, o.z, o.w] };
+      }
+    }
+    return this.eyeGaze.update({ present: gazeSource !== null, pose, rayPoses }, snapshots, this.frameSeconds);
   }
 
   /** Analog trigger where available, else the select event state. */
@@ -497,6 +561,7 @@ export class WebXRInputProvider implements InputProvider {
   }
 
   dispose(): void {
+    this.eyeGaze.reset();
     this.detachDom();
     if (this.boundSession) {
       for (const [type, handler] of this.sessionHandlers) {

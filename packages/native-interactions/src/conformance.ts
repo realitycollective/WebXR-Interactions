@@ -23,6 +23,7 @@ import { NativeHitTester } from "./hit-tester.js";
 import { NativeInteractions } from "./host.js";
 import { NativeInputProvider } from "./provider.js";
 import { NativeTransformPort } from "./transform-port.js";
+import type { Vec3Tuple } from "@realitycollective/webxr-input";
 import type {
   NativeInputHost,
   NativeInteractionHost,
@@ -154,6 +155,49 @@ export function nativeInteractionsHostConformanceCases(): NativeInteractionsHost
         }
       } finally {
         provider.dispose();
+      }
+    }),
+    hostCase("input/eye gaze: a host that reports eye tracking poses the gaze, and the binding takes far targeting", ({ input }, name) => {
+      // Runs when the host reports eye tracking; a host without it (visionOS,
+      // a Quest without eye tracking) passes without running. With it, the
+      // host must hand the binding a valid pose in a live, focused session,
+      // and the binding then samples one gaze snapshot with a ray. That the
+      // hand and controller far rays drop is the shared contract case.
+      if (!input.getFacts().eyeTracking) return;
+      if (typeof input.getEyeGazePose !== "function") {
+        fail(name, "the host reports eyeTracking but has no getEyeGazePose(); the binding cannot use a fact it cannot pose");
+      }
+      const provider = new NativeInputProvider({ input });
+      try {
+        if (!provider.getCapabilities().eyeGaze) {
+          fail(name, "the host reports eyeTracking in a live session, so capabilities.eyeGaze must be true; is the session focused?");
+        }
+        const pose = input.getEyeGazePose();
+        if (!pose || [...pose.position, ...pose.quaternion].some((n) => !Number.isFinite(n))) {
+          fail(name, `getEyeGazePose() returned ${JSON.stringify(pose)}; run the kit while the user's eyes are tracked`);
+        }
+        const gaze = provider.sample().find((source) => source.kind === "gaze");
+        if (!gaze?.ray) fail(name, "with a valid gaze pose the binding must sample one gaze snapshot with a ray");
+      } finally {
+        provider.dispose();
+      }
+    }),
+    hostCase("input/eye gaze: a cone query never answers with a hidden target", ({ interactions, testHost }, name) => {
+      if (!interactions.hitCone) return;
+      testHost.clearTargets();
+      try {
+        testHost.placeTarget("rc-kit-cone", [0.2, 1, -2], 0.1);
+        const ray = { origin: [0, 1, 0] as Vec3Tuple, direction: [0, 0, -1] as Vec3Tuple };
+        const shown = interactions.hitCone(ray, (5 * Math.PI) / 180, 30);
+        if (!shown || shown.targetId !== "rc-kit-cone") {
+          fail(name, "a target 0.2 m beside a ray 2 m out, inside a 5 degree cone, was not found");
+        }
+        testHost.setTargetVisible?.("rc-kit-cone", false);
+        if (testHost.setTargetVisible && interactions.hitCone(ray, (5 * Math.PI) / 180, 30) !== null) {
+          fail(name, "the cone query answered with a hidden target");
+        }
+      } finally {
+        testHost.clearTargets();
       }
     }),
     hostCase("input/presence never hides the cursors", ({ input, testHost }, name) => {

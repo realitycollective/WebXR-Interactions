@@ -105,6 +105,8 @@ export class NativeInteractions {
   }
 
   update(dt: number): void {
+    // The provider's eye-gaze filter and grace integrate over the same step.
+    this.provider.setFrameDelta(dt);
     this.runtime.update(dt);
   }
 

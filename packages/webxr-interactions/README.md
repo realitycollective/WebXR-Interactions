@@ -16,6 +16,7 @@ npm install @realitycollective/webxr-interactions
 | --- | --- |
 | **Behaviours** | Ready-made interaction types: `press` (with an optional latching mode that stays down until pressed again), `pulse`, `hinge`, `dial`, `slide`, `grab`, and `tossScore` for throw-and-catch scoring |
 | **Gaze** | Optional look-to-activate. Require the user to be looking before an object responds, or let a sustained look trigger the press by itself |
+| **Eye gaze and pinch** | With a provider that reports `capabilities.eyeGaze`, the runtime targets the gaze source through a 5 degree cone (`HitTester.hitCone`) and a 0.15 s dwell consensus, targets nothing while a near pointer is active, presses or grabs on the owning hand's pinch, and drives a gaze-started drag from the hand (IWSDK 1.0.0 gaze-and-pinch, on every platform) |
 | **Targeting** | Picks one target per hand, trying the platform's own answer first, then a close-range touch, then a pointing ray. A short delay stops the target flickering between two objects on a boundary |
 | **Capability checks** | If the headset cannot do what a behaviour needs, the behaviour switches itself off and reports `behaviourDisabled`, rather than silently doing nothing |
 | **Events** | The core never calls into your code. It emits events and you subscribe |

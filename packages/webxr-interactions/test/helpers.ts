@@ -74,6 +74,23 @@ export class FakeProvider implements InputProvider {
 export class FakeHitTester implements HitTester {
   rayTarget: string | null = null;
   proximityTarget: string | null = null;
+  /** The cone query's answer while `withCone` is set; the runtime falls back to `hitRay` otherwise. */
+  coneTarget: string | null = null;
+  conePoint: Vec3Tuple = [0, 1.5, -2];
+  /** The last cone query, so a test can see the angle and length the runtime asked for. */
+  lastCone: { ray: RayTuple; halfAngle: number; maxLength: number } | null = null;
+  hitCone?: (ray: RayTuple, halfAngle: number, maxLength: number) => InteractableHit | null;
+
+  constructor(withCone = false) {
+    if (withCone) {
+      this.hitCone = (ray, halfAngle, maxLength) => {
+        this.lastCone = { ray, halfAngle, maxLength };
+        return this.coneTarget
+          ? { interactableId: this.coneTarget, distance: 2, point: [...this.conePoint] }
+          : null;
+      };
+    }
+  }
   /** Distance reported for the proximity hit; 1 cm by default, well inside every radius. */
   proximityDistance = 0.01;
   /** The radius of the last proximity query, so a test can see what the runtime asked for. */

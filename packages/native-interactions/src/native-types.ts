@@ -57,6 +57,18 @@ export interface NativeInputFacts {
    * `"hand-tracking"`. A tracked hand source also counts, without this.
    */
   handTracking: boolean;
+  /**
+   * An eye-gaze source is present: OpenXR `XR_EXT_eye_gaze_interaction` is
+   * bound and its action is active (`isActive`), on a device with eye
+   * tracking and the eye-tracking permission granted; visionOS never
+   * reports one (gaze reaches an app only at the moment of a pinch). IWSDK:
+   * an `XRInputSource` with `targetRayMode === "gaze"`. While true the
+   * binding applies the eye-gaze rule (`@realitycollective/webxr-input`
+   * `eye-gaze.ts`): `capabilities.eyeGaze` is true, hand and controller far
+   * rays are dropped once a valid gaze pose has been seen, and a pinch
+   * selects what is gazed at. The host draws none of this; it reports.
+   */
+  eyeTracking: boolean;
 }
 
 /**
@@ -97,6 +109,16 @@ export interface NativeInputHost {
   sample(): readonly InputSourceSnapshot[];
   /** The viewer's head pose this frame. Present on any host that tracks a head; capabilities `gaze` and `headPose` follow it. */
   getHeadPose?(): HeadPose;
+  /**
+   * This frame's gaze target-ray pose, world space (`-Z` along the gaze),
+   * or null when the runtime has no valid pose this frame (a blink, an
+   * uncalibrated headset: OpenXR `XrEyeGazeSampleTimeEXT` not current, or
+   * the pose's `XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT` clear). Raw: the
+   * binding filters it, as IWSDK's `GazePointer` filters
+   * `xrOrigin.eyeSpace`. Read every frame while `eyeTracking` is true.
+   * Required when `eyeTracking` can be true; without it the fact is ignored.
+   */
+  getEyeGazePose?(): PoseTuple | null;
   /**
    * Pre-resolved targeting hints, for a host with its own targeting. Frame
    * fresh: the hints for the frame `sample()` just reported. A hint beats the
@@ -153,6 +175,22 @@ export interface NativeInteractionHost {
    * Never the distance to the centre. IWSDK: `EntityHitTester.hitProximity`.
    */
   hitProximity(point: Vec3Tuple, radius: number): NativeHit | null;
+  /**
+   * Eye-gaze targeting: the best shown target inside a cone of `halfAngle`
+   * radians about `ray`, no farther than `maxLength` metres, or null. A
+   * target the ray reaches (as `hitRay`) wins outright with the point where
+   * the ray enters it; otherwise the target whose silhouette is nearest the
+   * ray in angle, and within half a degree the nearer one, with `point` the
+   * point of the target nearest the ray and `distance` metres to it. For a
+   * sphere target this is `coneHitForSpheres` in
+   * `@realitycollective/webxr-interactions`; a host that tests meshes
+   * measures to the closest point on the mesh's bounds, as IWSDK's
+   * `GazeConecaster` does with an oriented bounding box. Optional: without
+   * it the binding targets eye gaze with `hitRay` alone, so a glance that
+   * misses a small target by a degree finds nothing. IWSDK:
+   * `GazeConecaster.findFrameBest`.
+   */
+  hitCone?(ray: RayTuple, halfAngle: number, maxLength: number): NativeHit | null;
   /**
    * The radius, in metres, the host hit-tests a registered target with.
    * Called once per registration with the app's `targetRadius`, or 0.1 when
@@ -212,6 +250,8 @@ export interface NativeInteractionsTestHost {
   lastRelease(targetId: string): HoldRelease | undefined;
   /** Every cursor disc the host draws now, as world positions. */
   cursors(): Vec3Tuple[];
+  /** Hide or show a placed target with the host's ordinary visibility flag, for the hidden-target cone case. Optional. */
+  setTargetVisible?(targetId: string, visible: boolean): void;
 }
 
 /**
@@ -303,5 +343,6 @@ export function copySnapshot(source: InputSourceSnapshot): InputSourceSnapshot {
   if (source.angularVelocity) copy.angularVelocity = copyVec3(source.angularVelocity);
   if (source.nativeGrabbing !== undefined) copy.nativeGrabbing = source.nativeGrabbing;
   if (source.hapticsAvailable !== undefined) copy.hapticsAvailable = source.hapticsAvailable;
+  if (source.selectorPose) copy.selectorPose = copyPose(source.selectorPose);
   return copy;
 }

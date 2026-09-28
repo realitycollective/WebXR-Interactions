@@ -171,13 +171,108 @@ function nativeProvider(): Built {
   };
 }
 
+/** The same platforms with eye gaze live, so the shared eye-gaze cases run rather than skip. */
+function iwsdkGazeProvider(): Built {
+  const world = makeWorld({
+    session: new FakeSession({ inputSources: [{ hand: {} }, { targetRayMode: "gaze" }] }),
+    gamepads: { right: new FakeGamepad({ selecting: true }) },
+    gaze: { tracked: true },
+  });
+  const provider = new IWSDKInputProvider(world as unknown as World);
+  // Two samples: the second sees the pinch released and armed; a third pinch would own.
+  return { provider };
+}
+
+function threeGazeProvider(): Built {
+  const targetRaySpace = {};
+  const gazeSpace = {};
+  const session = {
+    visibilityState: "visible",
+    inputSources: [
+      { handedness: "right", targetRayMode: "tracked-pointer", targetRaySpace },
+      { handedness: "none", targetRayMode: "gaze", targetRaySpace: gazeSpace },
+    ],
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  };
+  const poses = new Map<object, unknown>([
+    [targetRaySpace, fakePose([0.2, 1.2, -0.2])],
+    [gazeSpace, fakePose([0, 1.6, 0])],
+  ]);
+  const frame = { getPose: (space: object) => poses.get(space), getJointPose: () => undefined };
+  const provider = new WebXRInputProvider({
+    xr: { getSession: () => session, getReferenceSpace: () => ({}), getFrame: () => frame },
+    camera: new PerspectiveCamera(70, 4 / 3, 0.05, 100),
+  } as never);
+  return { provider };
+}
+
+function babylonGazeProvider(): Built {
+  const eye = { isEyeGazeValid: true, getEyeGaze: () => ({ origin: { x: 0, y: 1.6, z: 0 }, direction: { x: 0, y: 0, z: 1 } }) };
+  const pointer = { getAbsolutePosition: () => ({ x: 0.2, y: 1.2, z: 0.2 }), absoluteRotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } };
+  const provider = new BabylonInputProvider({
+    scene: { onPointerObservable: { add: () => null, remove: () => true }, activeCamera: { globalPosition: { x: 0, y: 1.6, z: 0 } } },
+    xr: {
+      baseExperience: {
+        sessionManager: {
+          session: { visibilityState: "visible" },
+          onXRSessionInit: { add: () => null, remove: () => true },
+          onXRSessionEnded: { add: () => null, remove: () => true },
+        },
+        featuresManager: { getEnabledFeature: (name: string) => (name === "xr-eye-tracking" ? eye : null) },
+      },
+      input: {
+        controllers: [{ uniqueId: "right", inputSource: { handedness: "right" }, pointer }],
+        onControllerAddedObservable: { add: () => null, remove: () => true },
+        onControllerRemovedObservable: { add: () => null, remove: () => true },
+      },
+    },
+  } as never);
+  return { provider };
+}
+
+function nativeGazeProvider(): Built {
+  const host = new FakeInputHost({ headPose: true, eyeGaze: true });
+  host.eyeTracking = true;
+  host.sources = [
+    { id: "left-hand", kind: "hand", handedness: "left", select: 0, squeeze: 0, ray: { origin: [-0.2, 1.2, -0.2], direction: [0, 0, -1] } },
+    { id: "right-hand", kind: "hand", handedness: "right", select: 1, squeeze: 0, ray: { origin: [0.2, 1.2, -0.2], direction: [0, 0, -1] } },
+  ];
+  host.enterSession();
+  const provider = new NativeInputProvider({ input: host });
+  // The pinch is held from before gaze took over, so it must not own; the
+  // eye-gaze cases see a gaze snapshot owned by none.
+  return { provider, driver: { enterSession: () => host.enterSession(), exitSession: () => host.exitSession() } };
+}
+
 const providers: Array<[string, () => Built]> = [
   ["iwsdk", iwsdkProvider],
   ["threejs", threeProvider],
   ["xrblocks", xrBlocksProvider],
   ["babylon", babylonProvider],
   ["native", nativeProvider],
+  ["iwsdk with eye gaze", iwsdkGazeProvider],
+  ["threejs with eye gaze", threeGazeProvider],
+  ["babylon with eye gaze", babylonGazeProvider],
+  ["native with eye gaze", nativeGazeProvider],
 ];
+
+describe("eye gaze is live on the platforms that can report it", () => {
+  it.each([["iwsdk", iwsdkGazeProvider], ["threejs", threeGazeProvider], ["babylon", babylonGazeProvider], ["native", nativeGazeProvider]] as const)(
+    "%s samples a gaze snapshot with a ray and no hand or controller far ray",
+    (_name, build) => {
+      const { provider } = build();
+      expect(provider.getCapabilities().eyeGaze).toBe(true);
+      const sources = provider.sample();
+      expect(sources.find((s) => s.kind === "gaze")?.ray).toBeDefined();
+      expect(sources.some((s) => (s.kind === "hand" || s.kind === "controller") && s.ray)).toBe(false);
+    },
+  );
+
+  it("XR Blocks never reports eye gaze: its gaze source is the camera, a head gaze", () => {
+    expect(xrBlocksProvider().provider.getCapabilities().eyeGaze).toBe(false);
+  });
+});
 
 describe.each(providers)("%s provider", (_name, build) => {
   for (const contractCase of inputProviderContractCases()) {

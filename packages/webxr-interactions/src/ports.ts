@@ -52,6 +52,21 @@ export interface HitTester {
    * {@link hitRay} applies here.
    */
   hitProximity(point: Vec3Tuple, radius: number): InteractableHit | null;
+  /**
+   * Eye-gaze targeting: the best target inside a cone of `halfAngle` radians
+   * about `ray`, no farther than `maxLength` metres, or `null`. A target the
+   * ray itself reaches (as {@link hitRay}) wins outright; otherwise the
+   * target whose silhouette is nearest the ray in angle, and, within half a
+   * degree of each other, the nearer one. `distance` is metres to the point
+   * aimed at and `point` is that point on the target, which a selection then
+   * aims at from the pinching hand. This is IWSDK's `GazeConecaster`
+   * (`@iwsdk/xr-input` 1.0.0), which measures the angle to the closest point
+   * on the target's oriented bounding box; a sphere target measures to its
+   * silhouette, `coneHitForSpheres` in `gaze.ts`. The same hidden-target rule
+   * as {@link hitRay} applies. Absent, the runtime targets eye gaze with
+   * {@link hitRay} alone, without cone assistance.
+   */
+  hitCone?(ray: RayTuple, halfAngle: number, maxLength: number): InteractableHit | null;
 }
 
 /**
