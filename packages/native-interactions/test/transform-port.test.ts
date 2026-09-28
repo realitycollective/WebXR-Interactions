@@ -60,11 +60,18 @@ describe("NativeTransformPort", () => {
     expect(port.setEffect).toBeUndefined();
   });
 
-  it("omits beginHold and endHold when the host does not carry them", () => {
+  it("fails construction, naming both, on a host without beginHold and endHold (change 24)", () => {
+    const host = new FakeInteractionHost() as Partial<FakeInteractionHost>;
+    const bare = { ...host, beginHold: undefined, endHold: undefined } as unknown as FakeInteractionHost;
+    expect(() => new NativeTransformPort("plain", { interactions: bare })).toThrow(/beginHold\(targetId\) and endHold/);
+  });
+
+  it("always hands endHold to the host, so a release velocity is never dropped (change 24)", () => {
     const host = new FakeInteractionHost();
     const port = new NativeTransformPort("plain", { interactions: host });
-    expect(port.beginHold).toBeUndefined();
-    expect(port.endHold).toBeUndefined();
+    port.beginHold();
+    port.endHold({ linearVelocity: [0, 3, 0], angularVelocity: [0, 0, 0] });
+    expect(host.endHoldCalls).toEqual([["plain", { linearVelocity: [0, 3, 0], angularVelocity: [0, 0, 0] }]]);
   });
 
   it("forwards beginHold and endHold, keyed by target id, and copies the release velocity", () => {

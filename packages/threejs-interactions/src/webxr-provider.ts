@@ -10,6 +10,8 @@
  *
  * Capabilities are derived from the LIVE session (never the requested
  * config) and re-published on session start/end and input-source changes.
+ * `sample()` reports no sources at all while the session exists but is not
+ * `"visible"`, the same rule IWSDK's provider applies.
  */
 import {
   Raycaster,
@@ -271,6 +273,13 @@ export class WebXRInputProvider implements InputProvider {
       return this.sampleDesktop();
     }
 
+    // A session that exists but is not visible (backgrounded, or the
+    // browser's own "content is obscured" state) reports no sources at all,
+    // the same rule IWSDK's provider applies to `world.visibilityState`. A
+    // session with no `visibilityState` at all (a minimal fake) is treated
+    // as visible - every real `XRSession` carries the field.
+    if (session.visibilityState !== undefined && session.visibilityState !== "visible") return [];
+
     const frame = this.context.xr.getFrame();
     const referenceSpace = this.context.xr.getReferenceSpace();
     if (!frame || !referenceSpace) return [];
@@ -325,6 +334,11 @@ export class WebXRInputProvider implements InputProvider {
             applyPoseVelocity(snapshot, wristPose);
           }
         }
+      }
+      // A controller has no fingertip: its index tip is its ray origin, as
+      // IWSDK's input rig makes it, so a controller pokes as a finger does.
+      if (!snapshot.indexTip && !source.hand && snapshot.ray) {
+        snapshot.indexTip = [...snapshot.ray.origin];
       }
       if ((source.gamepad?.hapticActuators?.length ?? 0) > 0) {
         snapshot.hapticsAvailable = true;

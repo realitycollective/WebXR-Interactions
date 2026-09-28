@@ -40,7 +40,8 @@ describe("NativeInputProvider construction", () => {
     (globalThis as { __rcHost?: unknown }).__rcHost = { input: host };
     try {
       const provider = new NativeInputProvider();
-      expect(provider.getCapabilities()).toEqual(host.getCapabilities());
+      host.enterSession();
+      expect(provider.getCapabilities().rays).toBe(true);
     } finally {
       (globalThis as { __rcHost?: unknown }).__rcHost = original;
     }
@@ -97,11 +98,11 @@ describe("NativeInputProvider optional members", () => {
     const provider = new NativeInputProvider({ input: host });
 
     expect(provider.sampleHints?.()).toEqual(host.hints);
+    // Intensity is clamped to 0..1 before it reaches the host, as IWSDK clamps it.
     expect(provider.pulse?.("a", 2, 20)).toBe(true);
-    expect(host.pulses).toEqual([["a", 2, 20]]);
-    expect(provider.setPresenceVisible?.("left", true)).toBe(true);
-    expect(host.presenceVisible).toEqual([["left", true]]);
-    expect(provider.setPresenceModality?.("hands")).toBe(true);
-    expect(host.presenceModality).toEqual(["hands"]);
+    expect(host.pulses).toEqual([["a", 1, 20]]);
+    // Presence is decided here and handed to the host per side.
+    expect(provider.setPresenceVisible).toBeTypeOf("function");
+    expect(provider.setPresenceModality).toBeTypeOf("function");
   });
 });

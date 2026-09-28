@@ -53,8 +53,22 @@ export interface BabylonObservableLike<T> {
 }
 
 /**
- * Structural slice of Babylon's `TransformNode`, plus the one member
- * `AbstractMesh` adds that this adapter reads (`isVisible`).
+ * Structural slice of Babylon's `StandardMaterial`/`PBRMaterial` emissive
+ * channel - written from the Babylon 7 documentation, on the same honesty
+ * terms as the rest of this file. `emissiveColor` is common to both;
+ * `emissiveIntensity` is a PBRMaterial-only scalar multiplier over it -
+ * `StandardMaterial` has no such field, so it is absent there and
+ * `BabylonTransformPort.setEffect` only scales `emissiveColor` for one.
+ */
+export interface BabylonMaterialLike {
+  emissiveColor?: BabylonVector3Like;
+  /** PBRMaterial only - StandardMaterial carries no separate intensity. */
+  emissiveIntensity?: number;
+}
+
+/**
+ * Structural slice of Babylon's `TransformNode`, plus the two members
+ * `AbstractMesh` adds that this adapter reads (`isVisible`, `material`).
  *
  * `parent` is `unknown` on purpose: Babylon types it as `Nullable<Node>`,
  * and `Node` carries none of the transform members, so anything narrower
@@ -73,6 +87,8 @@ export interface BabylonTransformNodeLike {
   isVisible?: boolean;
   /** Present only on a node Physics V2 has a body for - see {@link BabylonPhysicsBodyLike}. */
   physicsBody?: BabylonPhysicsBodyLike;
+  /** `AbstractMesh.material` - a multi-material mesh's first slot is what `setEffect`'s emissive pulse lights. */
+  material?: BabylonMaterialLike | BabylonMaterialLike[] | null;
 }
 
 /**

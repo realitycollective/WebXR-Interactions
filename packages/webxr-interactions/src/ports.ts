@@ -23,7 +23,34 @@ export interface InteractableHit {
  * A ray or point passed in is read during the call and not kept.
  */
 export interface HitTester {
+  /**
+   * The nearest target along `ray` (origin in metres, direction normalised),
+   * or `null`. A target counts when its centre is within its own radius of
+   * the ray line and in front of the origin; `distance` is the ray parameter
+   * `t` of the closest point, and `t <= 0` never hits. This is IWSDK's
+   * `EntityHitTester.hitRay` (`iwsdk-interactions/src/register.ts`). A
+   * mesh-accurate tester may report the surface it hit instead, within the
+   * target's radius of that answer; `hitTesterContractCases()` holds both to
+   * the same tolerance.
+   *
+   * A target hidden by its engine's own visibility flag - including one
+   * inherited from an ancestor - is never a candidate, even on an engine
+   * whose own raycast ignores that flag by design (three.js's `Raycaster`
+   * does; see `ThreeHitTester.hitRay`). The adapter re-applies the rule
+   * itself in that case.
+   */
   hitRay(ray: RayTuple): InteractableHit | null;
+  /**
+   * The nearest target to `point` within `radius` metres of its SURFACE, or
+   * `null`. `distance` is `max(0, |centre - point| - targetRadius)`: a point
+   * 3 cm outside a 10 cm target reports 0.03, and a point inside reports 0.
+   * Never the distance to the centre, which would put every fingertip out of
+   * poke range. This is IWSDK's `EntityHitTester.hitProximity`, and a target
+   * registered with no declared radius is a 0.1 m sphere - IWSDK's default,
+   * and the one every adapter that lets a target omit its radius (three.js,
+   * XR Blocks, Babylon) uses too. The same hidden-target rule as
+   * {@link hitRay} applies here.
+   */
   hitProximity(point: Vec3Tuple, radius: number): InteractableHit | null;
 }
 
@@ -86,7 +113,15 @@ export interface TransformPort {
    * the one meaning: the object is simply placed there.
    */
   setWorldPose?(pose: PoseTuple): void;
-  /** Additive presentation effect (pulse): scale multiplier & emissive boost. */
+  /**
+   * Presentation effect (the pulse behaviour): `scale` multiplies the REST
+   * scale (1 is rest size) and `emissive` is ADDED to the material's base
+   * emissive intensity (0 is none). Each field replaces the previous value
+   * for this object: the last write wins, and nothing accumulates across
+   * calls, so a behaviour that combines effects (pulse stacking on a press)
+   * computes the combined value before it writes. An omitted field is left
+   * as it is. This is `IWSDKTransformPort.setEffect`.
+   */
   setEffect?(effect: { scale?: number; emissive?: number }): void;
   /**
    * Suspend physics for this object: from here until the matching

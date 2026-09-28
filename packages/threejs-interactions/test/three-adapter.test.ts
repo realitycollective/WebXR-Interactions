@@ -282,6 +282,16 @@ describe("WebXRInputProvider native velocity", () => {
     return sample({ handedness: "left", targetRaySpace, hand }, poses);
   }
 
+  it("gives a controller its ray origin as its index tip, as IWSDK's input rig does", () => {
+    const snapshot = controllerSample();
+    expect(snapshot.indexTip).toEqual(snapshot.ray?.origin);
+    expect(snapshot.indexTip).not.toBe(snapshot.ray?.origin);
+  });
+
+  it("does not give a hand its ray origin as its index tip", () => {
+    expect(wristSample().indexTip).toBeUndefined();
+  });
+
   it("passes a controller grip pose's velocity through as tuples", () => {
     const snapshot = controllerSample({ linear: [1, 2, 3], angular: [0.4, 0.5, 0.6] });
     expect(snapshot.linearVelocity).toEqual([1, 2, 3]);
@@ -304,6 +314,38 @@ describe("WebXRInputProvider native velocity", () => {
     const angularOnly = controllerSample({ angular: [0, 2, 0] });
     expect(angularOnly.linearVelocity).toBeUndefined();
     expect(angularOnly.angularVelocity).toEqual([0, 2, 0]);
+  });
+
+  it("returns nothing while the app is not visible, as IWSDK's provider does", () => {
+    const targetRaySpace = {};
+    const gripSpace = {};
+    const poses = new Map<object, unknown>([
+      [targetRaySpace, pose([0, 1.5, -0.1])],
+      [gripSpace, pose([0.1, 1.2, -0.3])],
+    ]);
+    let visibilityState = "visible";
+    const session = {
+      get visibilityState() {
+        return visibilityState;
+      },
+      inputSources: [{ handedness: "right", targetRaySpace, gripSpace }],
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+    const frame = {
+      getPose: (space: object) => poses.get(space),
+      getJointPose: (joint: object) => poses.get(joint),
+    };
+    const provider = new WebXRInputProvider({
+      xr: { getSession: () => session, getReferenceSpace: () => ({}), getFrame: () => frame },
+      camera: new PerspectiveCamera(70, 4 / 3, 0.05, 100),
+    } as never);
+
+    expect(provider.sample().length).toBe(1);
+    visibilityState = "hidden";
+    expect(provider.sample()).toEqual([]);
+    visibilityState = "visible";
+    expect(provider.sample().length).toBe(1);
   });
 
   it("passes the wrist-fallback pose's velocity through the same way", () => {

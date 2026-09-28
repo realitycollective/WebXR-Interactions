@@ -40,6 +40,10 @@ const FRESH_HIT = "each hit and its point are fresh values the caller owns";
 
 /** One deliberate defect at a time, so each broken-fake test names the case it breaks. */
 interface HitTesterFakeConfig {
+  /** hitRay hits any target in front of the ray, however far it passes. */
+  ignoresRadius?: boolean;
+  /** Report proximity distance to the target's centre rather than its surface. */
+  centreDistance?: boolean;
   /** Answers a hit even with nothing placed. */
   emptySceneHit?: boolean;
   /** Reports a different id than the target it actually found. */
@@ -58,15 +62,35 @@ interface HitTesterFakeConfig {
   pickFarther?: boolean;
   /** Hands back the target's own stored position as the hit point. */
   sharedPoint?: boolean;
+  /** placeBare registers a bare target at radius 0 rather than the 0.1 m default. */
+  ignoresDefaultRadius?: boolean;
+  /** Never excludes a target setVisible(id, false) hid. */
+  ignoresVisible?: boolean;
 }
+
+const BARE_RADIUS = 0.1;
 
 class FakeHitTesterHost implements HitTester {
   private readonly targets = new Map<string, { position: Vec3Tuple; radius: number }>();
+  private readonly hidden = new Set<string>();
 
   constructor(private readonly config: HitTesterFakeConfig = {}) {}
 
   place(id: string, position: Vec3Tuple, radius: number): void {
     this.targets.set(id, { position, radius });
+  }
+
+  placeBare(id: string, position: Vec3Tuple): void {
+    this.targets.set(id, { position, radius: this.config.ignoresDefaultRadius ? 0 : BARE_RADIUS });
+  }
+
+  setVisible(id: string, visible: boolean): void {
+    if (visible) this.hidden.delete(id);
+    else this.hidden.add(id);
+  }
+
+  private showing(id: string): boolean {
+    return this.config.ignoresVisible || !this.hidden.has(id);
   }
 
   hitRay(ray: RayTuple): InteractableHit | null {
@@ -75,8 +99,16 @@ class FakeHitTesterHost implements HitTester {
     }
     let best: [string, number] | null = null;
     for (const [id, target] of this.targets) {
+      if (!this.showing(id)) continue;
       const t = along(ray, target.position);
       if (!this.config.ignoresDirection && t <= 0) continue;
+      // IWSDK's rule: the target's centre within its radius of the ray.
+      const closest: Vec3Tuple = [
+        ray.origin[0] + ray.direction[0] * t,
+        ray.origin[1] + ray.direction[1] * t,
+        ray.origin[2] + ray.direction[2] * t,
+      ];
+      if (!this.config.ignoresRadius && dist(closest, target.position) > target.radius) continue;
       const wins = best === null || (this.config.pickFarther ? t > best[1] : t < best[1]);
       if (wins) best = [id, t];
     }
@@ -99,8 +131,11 @@ class FakeHitTesterHost implements HitTester {
   hitProximity(point: Vec3Tuple, radius: number): InteractableHit | null {
     if (this.config.blindProximity) return null;
     for (const [id, target] of this.targets) {
-      const distance = dist(point, target.position);
-      if (this.config.greedyProximity || distance <= target.radius + radius) {
+      if (!this.showing(id)) continue;
+      const centre = dist(point, target.position);
+      const surface = Math.max(0, centre - target.radius);
+      if (this.config.greedyProximity || surface <= radius) {
+        const distance = this.config.centreDistance ? centre : surface;
         return { interactableId: id, distance, point: this.pointOf(target.position) };
       }
     }
@@ -151,6 +186,28 @@ describe("hitTesterContractCases", () => {
 });
 
 describe("hitTesterContractCases catches a broken host", () => {
+  it("rejects a host that measures proximity to the centre, not the surface", () => {
+    expect(() =>
+      runHitTesterCase("hitProximity reports the distance to the target's SURFACE, clamped at zero", {
+        centreDistance: true,
+      }),
+    ).toThrow(/distance must be to the surface, 0\.03 within 1 mm, got 0\.13/);
+  });
+
+  it("rejects a host whose ray hits a target it passes far from", () => {
+    expect(() =>
+      runHitTesterCase("a ray that passes a target farther than its radius misses it", { ignoresRadius: true }),
+    ).toThrow(/must miss it/);
+  });
+
+  it("rejects a host that finds a target by its centre within the query radius", () => {
+    expect(() =>
+      runHitTesterCase("hitProximity misses a target whose surface is farther than the query radius", {
+        greedyProximity: true,
+      }),
+    ).toThrow(/outside a 2 cm query/);
+  });
+
   it("rejects a host that answers a hit on an empty scene", () => {
     expect(() => runHitTesterCase(EMPTY, { emptySceneHit: true })).toThrow(
       /hitRay over an empty scene must return null/,
@@ -203,6 +260,23 @@ describe("hitTesterContractCases catches a broken host", () => {
     expect(() => runHitTesterCase(FRESH_HIT, { sharedPoint: true })).toThrow(
       /hitRay must return a new hit and point each call/,
     );
+  });
+
+  it("rejects a host that gives a bare target a zero radius instead of the 0.1 m default", () => {
+    expect(() =>
+      runHitTesterCase(
+        "hitProximity treats a target with no declared radius as a 0.1 m sphere, when the driver can register one",
+        { ignoresDefaultRadius: true },
+      ),
+    ).toThrow(/must be found within a 0\.05 m query/);
+  });
+
+  it("rejects a host that still answers with a target hidden by visible alone", () => {
+    expect(() =>
+      runHitTesterCase("an object hidden by visible alone is never hit, when the driver can toggle it", {
+        ignoresVisible: true,
+      }),
+    ).toThrow(/must not hit a target hidden by visible alone/);
   });
 
   it("fails loudly when asked for a case that does not exist", () => {

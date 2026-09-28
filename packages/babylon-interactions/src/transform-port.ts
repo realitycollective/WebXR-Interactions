@@ -27,6 +27,7 @@ import {
   toVec3,
   writeQuat,
   writeVec3,
+  type BabylonMaterialLike,
   type BabylonQuaternionLike,
   type BabylonTransformNodeLike,
   type BabylonVector3Like,
@@ -67,6 +68,10 @@ export class BabylonTransformPort implements TransformPort {
   private restQuaternion: QuatTuple = [0, 0, 0, 1];
   private restScale: Vec3Tuple = [1, 1, 1];
   private held = false;
+  /** The material's `emissiveColor` before any pulse, captured on first use. */
+  private baseEmissiveColor: Vec3Tuple | null = null;
+  /** PBRMaterial's `emissiveIntensity` before any pulse, captured on first use - StandardMaterial has none. */
+  private baseEmissiveIntensity: number | null = null;
 
   readonly beginHold?: () => void;
   readonly endHold?: (release: HoldRelease) => void;
@@ -176,20 +181,50 @@ export class BabylonTransformPort implements TransformPort {
   }
 
   /**
-   * Uniform scale about the rest scale. The emissive part of the intent is
-   * not applied: reaching a material's emissive colour means knowing which
-   * Babylon material the node carries, and this package holds no Babylon
-   * types. Apps that want the glow subscribe to the core's feedback intents.
+   * Uniform scale about the rest scale, and - mirroring the IWSDK and
+   * three.js ports - a pulse of light: `emissiveColor` is scaled by
+   * `1 + effect.emissive` about its own base colour (StandardMaterial and
+   * PBRMaterial both carry it), and on a PBRMaterial `emissiveIntensity` is
+   * ALSO set to its base plus `effect.emissive`, the same additive rule
+   * three.js's `emissiveIntensity` follows - PBRMaterial's field is that
+   * one's Babylon analogue. A node with no material, or a material with no
+   * `emissiveColor`, is left alone. Base values are captured on first use,
+   * so a later `recaptureRest()`-style re-read is not needed for this part.
    */
   setEffect(effect: { scale?: number; emissive?: number }): void {
-    if (effect.scale === undefined) return;
-    const scaling = this.node.scaling;
-    if (!scaling) return;
-    writeVec3(scaling, [
-      this.restScale[0] * effect.scale,
-      this.restScale[1] * effect.scale,
-      this.restScale[2] * effect.scale,
-    ]);
+    if (effect.scale !== undefined) {
+      const scaling = this.node.scaling;
+      if (scaling) {
+        writeVec3(scaling, [
+          this.restScale[0] * effect.scale,
+          this.restScale[1] * effect.scale,
+          this.restScale[2] * effect.scale,
+        ]);
+      }
+    }
+    if (effect.emissive !== undefined) {
+      const material = this.firstMaterial();
+      if (material?.emissiveColor) {
+        if (this.baseEmissiveColor === null) this.baseEmissiveColor = toVec3(material.emissiveColor) ?? [0, 0, 0];
+        const factor = 1 + effect.emissive;
+        writeVec3(material.emissiveColor, [
+          this.baseEmissiveColor[0] * factor,
+          this.baseEmissiveColor[1] * factor,
+          this.baseEmissiveColor[2] * factor,
+        ]);
+        if (material.emissiveIntensity !== undefined) {
+          if (this.baseEmissiveIntensity === null) this.baseEmissiveIntensity = material.emissiveIntensity;
+          material.emissiveIntensity = this.baseEmissiveIntensity + effect.emissive;
+        }
+      }
+    }
+  }
+
+  /** The node's first material slot - `AbstractMesh.material`, single or the first of an array. */
+  private firstMaterial(): BabylonMaterialLike | null {
+    const material = this.node.material;
+    if (!material) return null;
+    return Array.isArray(material) ? (material[0] ?? null) : material;
   }
 
   /** Write a quaternion, creating the node's `rotationQuaternion` if needed. */

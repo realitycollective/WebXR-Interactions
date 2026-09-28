@@ -62,7 +62,7 @@ interface PresenceAdaptersLike {
  * Show or hide a visual by walking its DESCENDANTS rather than setting
  * `visible` on the root.
  *
- * Verified against `@iwsdk/xr-input` 0.5.3 (`dist/xr-input-manager.js`, the
+ * Verified against `@iwsdk/xr-input` 0.5.3 and 1.0.0 (`dist/xr-input-manager.js`, the
  * per-frame update): IWSDK writes `visualAdapter.visual.model.visible =
  * inputSourceData.isPrimary` every frame, so a root-level write is undone
  * before it is drawn. The engine never touches the descendants, so hiding

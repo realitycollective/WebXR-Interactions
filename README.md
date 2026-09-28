@@ -113,7 +113,7 @@ To develop against an unreleased `webxr-input`, use `npm link` rather than editi
 app → ONE adapter (threejs | babylon | iwsdk | xrblocks | native) → core (webxr-interactions) → contracts (@realitycollective/webxr-input, separate repo)
 ```
 
-Arrows only point down; the core's architecture test fails the moment an engine import lands in it. Physics deliberately stays with the client/app - adapters surface it only as the `grabs: "native"` capability.
+Arrows only point down; the core's architecture test fails the moment an engine import lands in it. The host engine owns physics. The core never simulates a body: an engine that grabs for itself is surfaced as the `grabs: "native"` capability, and on a `poseOnly` host whose object has a physics body the grab only suspends that physics while held (`TransformPort.beginHold`) and resumes it with the hand's release velocity (`endHold`).
 
 ## What this stack is and is not
 
@@ -121,4 +121,4 @@ The Reality Collective WebXR packages aim at one outcome: an app's logic, input 
 
 Portable world-building is not a current promise. Scene content (meshes, prefabs, placement) is built by the app, ideally behind a factory interface the app owns, so that a second host can implement the same factories. A shared content descriptor, following the shape of the UI family's `SceneDescriptor`, will be considered only when a second host is actually targeted. Meta's `iwsdk.scene.v1` format is an acceptable authoring interchange in the meantime.
 
-Position recorded on 2026-09-03 from the Pale Signal client's gaps report.
+Position recorded on 2026-09-03 from the Pale Signal client's gaps report. Updated 2026-09-25: loading, stacking and switching scenes is now the Environment family's `SceneManager`; what a scene contains is still the app's.
