@@ -35,7 +35,14 @@ import type {
   Unsubscribe,
   Vec3Tuple,
 } from "@realitycollective/webxr-input";
-import type { HoldRelease } from "@realitycollective/webxr-interactions";
+import type {
+  HoldRelease,
+  PhysicsBodySpec,
+  PhysicsBodyState,
+  PhysicsShapeSpec,
+  PhysicsVelocity,
+  PointerVisuals,
+} from "@realitycollective/webxr-interactions";
 
 /**
  * What the host knows about its session, from which this package derives
@@ -57,6 +64,18 @@ export interface NativeInputFacts {
    * `"hand-tracking"`. A tracked hand source also counts, without this.
    */
   handTracking: boolean;
+  /**
+   * An eye-gaze source is present: OpenXR `XR_EXT_eye_gaze_interaction` is
+   * bound and its action is active (`isActive`), on a device with eye
+   * tracking and the eye-tracking permission granted; visionOS never
+   * reports one (gaze reaches an app only at the moment of a pinch). IWSDK:
+   * an `XRInputSource` with `targetRayMode === "gaze"`. While true the
+   * binding applies the eye-gaze rule (`@realitycollective/webxr-input`
+   * `eye-gaze.ts`): `capabilities.eyeGaze` is true, hand and controller far
+   * rays are dropped once a valid gaze pose has been seen, and a pinch
+   * selects what is gazed at. The host draws none of this; it reports.
+   */
+  eyeTracking: boolean;
 }
 
 /**
@@ -98,6 +117,16 @@ export interface NativeInputHost {
   /** The viewer's head pose this frame. Present on any host that tracks a head; capabilities `gaze` and `headPose` follow it. */
   getHeadPose?(): HeadPose;
   /**
+   * This frame's gaze target-ray pose, world space (`-Z` along the gaze),
+   * or null when the runtime has no valid pose this frame (a blink, an
+   * uncalibrated headset: OpenXR `XrEyeGazeSampleTimeEXT` not current, or
+   * the pose's `XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT` clear). Raw: the
+   * binding filters it, as IWSDK's `GazePointer` filters
+   * `xrOrigin.eyeSpace`. Read every frame while `eyeTracking` is true.
+   * Required when `eyeTracking` can be true; without it the fact is ignored.
+   */
+  getEyeGazePose?(): PoseTuple | null;
+  /**
    * Pre-resolved targeting hints, for a host with its own targeting. Frame
    * fresh: the hints for the frame `sample()` just reported. A hint beats the
    * core's own hit tests, and is equivalent to `nativeGrabbing` for a grab.
@@ -111,13 +140,28 @@ export interface NativeInputHost {
   pulse?(sourceId: string, intensity: number, durationMs: number): boolean;
   /**
    * Show or hide one side's hand mesh and controller model, as decided here
-   * (`IWSDKInputProvider.applyPresence`). Presence is the MODELS only: the
-   * host never draws a ray for a hand, and it draws a cursor disc at every
-   * ray's hit on a panel or an interactable whatever presence says, as
-   * IWSDK's `CursorVisual` is. Called only when a side's result changed.
-   * Without this member `capabilities.presence` is false.
+   * (`IWSDKInputProvider.applyPresence`). Presence is the MODELS only: it
+   * never touches the ray or the cursor, which `applyPointerVisuals` owns.
+   * Called only when a side's result changed. Without this member
+   * `capabilities.presence` is false.
    */
   applyPresence?(side: "left" | "right", shown: NativePresenceShown): void;
+  /**
+   * Draw, or stop drawing, one source's ray and cursor, exactly as told.
+   * Decided here by the core near-pointer rule (`near-pointer.ts` in
+   * `@realitycollective/webxr-interactions`, IWSDK's `MultiPointer`): the
+   * ray shows only while the ray owns the source or no pointer does, never
+   * while the fingertip or grip owns it, and never for a source with no ray;
+   * the cursor disc shows exactly while the active pointer has a hit, at
+   * `cursorPoint` (world metres), the ray's hit or the surface point under
+   * the fingertip or grip. A host draws nothing for a source it was not told
+   * about, and never draws "a cursor at every ray hit" on its own, which is
+   * what this contract said before 28 September 2026 and what put a cursor
+   * on a touched object. Called every frame for every sampled source, with
+   * fresh objects the host may keep. IWSDK: `RayPointer.update` with
+   * `forceHideRay` and `CursorVisual.setVisible`.
+   */
+  applyPointerVisuals?(sourceId: string, visuals: PointerVisuals): void;
 }
 
 /** What the host's ray or proximity query reports: the target it reached, if any. */
@@ -154,6 +198,22 @@ export interface NativeInteractionHost {
    */
   hitProximity(point: Vec3Tuple, radius: number): NativeHit | null;
   /**
+   * Eye-gaze targeting: the best shown target inside a cone of `halfAngle`
+   * radians about `ray`, no farther than `maxLength` metres, or null. A
+   * target the ray reaches (as `hitRay`) wins outright with the point where
+   * the ray enters it; otherwise the target whose silhouette is nearest the
+   * ray in angle, and within half a degree the nearer one, with `point` the
+   * point of the target nearest the ray and `distance` metres to it. For a
+   * sphere target this is `coneHitForSpheres` in
+   * `@realitycollective/webxr-interactions`; a host that tests meshes
+   * measures to the closest point on the mesh's bounds, as IWSDK's
+   * `GazeConecaster` does with an oriented bounding box. Optional: without
+   * it the binding targets eye gaze with `hitRay` alone, so a glance that
+   * misses a small target by a degree finds nothing. IWSDK:
+   * `GazeConecaster.findFrameBest`.
+   */
+  hitCone?(ray: RayTuple, halfAngle: number, maxLength: number): NativeHit | null;
+  /**
    * The radius, in metres, the host hit-tests a registered target with.
    * Called once per registration with the app's `targetRadius`, or 0.1 when
    * it gave none, as IWSDK registers a bare target as a 10 cm sphere
@@ -179,21 +239,102 @@ export interface NativeInteractionHost {
    */
   setEffect?(targetId: string, effect: { scale?: number; emissive?: number }): void;
   /**
-   * A pose-only grab started: suspend this target's physics body, if it has
-   * one, so it follows `setWorldPose` exactly. REQUIRED when grabs are
-   * pose-only (`nativeGrab` off). A target with no body needs nothing.
-   * IWSDK: `beginHold` removes the `PhysicsBody` (`register.ts`,
-   * `physicsBindingFor`).
+   * A pose-only grab started on a target that has NO body in the `physics`
+   * slice: the host lets the object rest where the hold leaves it. A target
+   * that has a body is held through the `physics` slice instead
+   * (`NativePhysicsHost.suspend`), and this member is not called for it.
+   * REQUIRED when grabs are pose-only (`nativeGrab` off). IWSDK: `beginHold`
+   * removes the `PhysicsBody`.
    */
   beginHold(targetId: string): void;
   /**
-   * The grab ended: resume the body with `release` as its velocity (linear
-   * m/s and angular rad/s, world space; zeros for a synthesized release,
-   * which rests). A target with NO physics body rests where it was released,
-   * as on IWSDK where there is no body to re-add. IWSDK: `endHold` re-adds
-   * the `PhysicsBody` and, for a non-zero velocity, a `PhysicsManipulation`.
+   * The grab ended on a target with no body in the `physics` slice: the
+   * object rests where it was released, as on IWSDK where there is no body
+   * to re-add. `release` is the velocity it would have carried (linear m/s
+   * and angular rad/s, world space; zeros for a synthesized release). A
+   * target with a body is resumed through `NativePhysicsHost.resume` instead.
    */
   endHold(targetId: string, release: HoldRelease): void;
+}
+
+/**
+ * The native host's `physics` slice: the platform's physics engine behind
+ * the core `PhysicsFacility` contract (`physics.ts` in
+ * `@realitycollective/webxr-interactions`), one body per string id, the same
+ * ids the app registers interactables with. The host runs the platform's
+ * default engine, Jolt Physics on Quest and Android and RealityKit physics
+ * on visionOS, and applies these defaults exactly (IWSDK 1.0.0's, from
+ * `@iwsdk/core` `dist/physics/`): gravity `[0, -9.81, 0]` m/s², 60 steps
+ * per second with render interpolation, a body dynamic with linear and
+ * angular damping 0 and gravity factor 1, a shape "auto" (from the object's
+ * geometry) with density 1 kg/m³, restitution 0 and friction 0.5. An app
+ * may install its own `PhysicsFacility` here to replace the engine.
+ *
+ * Units: metres, seconds, radians. Poses are world space, quaternions
+ * `[x, y, z, w]`, +Y up. The binding copies every tuple it hands over and
+ * every tuple it reads, so the host may reuse its buffers.
+ *
+ * The host conformance kit runs the whole shared suite
+ * (`physicsFacilityContractCases()`) against this slice on the device.
+ */
+export interface NativePhysicsHost {
+  /** The engine behind the slice, for reports: `"jolt"`, `"realitykit"`, or an app's own name. Never empty. */
+  readonly engine: string;
+  /** World gravity, m/s². Starts at `[0, -9.81, 0]`. */
+  getGravity(): Vec3Tuple;
+  /** Set world gravity, m/s²; every dynamic body, sleeping ones included, sees it from the next step. */
+  setGravity(gravity: Vec3Tuple): void;
+  /**
+   * Add a body for `id` at `pose` with the specs given; a missing field takes
+   * the default above. `state`: `"dynamic"` responds to forces, collisions and
+   * gravity, `"static"` never moves, `"kinematic"` moves only by `setBodyPose`
+   * and pushes dynamic bodies. `shape.kind` `"auto"` is the host's collider
+   * for the object's geometry; `"box"` takes full extents in `dimensions`,
+   * `"sphere"` its radius in `dimensions[0]`, `"capsule"` radius and height.
+   * Adding an id that exists replaces it. IWSDK: `PhysicsBody` and `PhysicsShape`.
+   */
+  addBody(id: string, pose: PoseTuple, body?: PhysicsBodySpec, shape?: PhysicsShapeSpec): void;
+  /** Remove the body; a missing id is ignored. */
+  removeBody(id: string): void;
+  hasBody(id: string): boolean;
+  /** Change how the body moves; a suspended body takes the new state when it resumes. */
+  setBodyState(id: string, state: PhysicsBodyState): void;
+  getBodyState(id: string): PhysicsBodyState;
+  /** Where the body is now, world space. Throws an error whose message contains `no physics body "<id>"` for an unknown id. */
+  getBodyPose(id: string): PoseTuple;
+  /**
+   * Teleport: the body is at `pose` from the next step with its velocity
+   * cleared, so it rests there rather than carrying what it did. While
+   * suspended the write is exact and carries nothing. IWSDK:
+   * `PhysicsSystem.setBodyTransform`.
+   */
+  setBodyPose(id: string, pose: PoseTuple): void;
+  /** Linear m/s and angular rad/s (axis scaled), world space. */
+  getVelocity(id: string): PhysicsVelocity;
+  /** Set both velocities. IWSDK: `PhysicsManipulation`. */
+  setVelocity(id: string, velocity: PhysicsVelocity): void;
+  /**
+   * A hold began: from here until `resume` the body is not simulated (no
+   * gravity, no collision response) and `setBodyPose` writes are exact. A
+   * second `suspend` changes nothing. IWSDK: `beginHold` removes the body.
+   */
+  suspend(id: string): void;
+  /**
+   * The hold ended: simulate the body again in the state it had, with
+   * `release` as its velocity so a throw carries through (zeros rest it).
+   * Resuming a body that is not suspended changes nothing. IWSDK:
+   * `endHold` re-adds the body with a `PhysicsManipulation`.
+   */
+  resume(id: string, release: HoldRelease): void;
+  isSuspended(id: string): boolean;
+  /**
+   * Advance the world by `dtSeconds`. A host whose engine steps itself from
+   * its own loop may take this as a hint and return; the kit then reads the
+   * poses the engine wrote. The binding calls it once per `update(dt)`.
+   */
+  step(dtSeconds: number): void;
+  /** Release the world and every body. */
+  dispose(): void;
 }
 
 /**
@@ -212,6 +353,10 @@ export interface NativeInteractionsTestHost {
   lastRelease(targetId: string): HoldRelease | undefined;
   /** Every cursor disc the host draws now, as world positions. */
   cursors(): Vec3Tuple[];
+  /** What the host draws for one source now, as last told through `applyPointerVisuals`; undefined for a source never told. */
+  pointerVisuals?(sourceId: string): PointerVisuals | undefined;
+  /** Hide or show a placed target with the host's ordinary visibility flag, for the hidden-target cone case. Optional. */
+  setTargetVisible?(targetId: string, visible: boolean): void;
 }
 
 /**
@@ -222,10 +367,15 @@ export interface NativeFrameSource {
   onFrame(callback: (timestampMs: number, deltaS: number) => void): () => void;
 }
 
-/** The two slices this package reads off `globalThis.__rcHost`. */
+/**
+ * The slices this package reads off `globalThis.__rcHost`. `physics` is
+ * part of the contract on every native platform: a host without it fails
+ * the conformance kit, and a target cannot carry a body until it is there.
+ */
 export interface NativeHostSlices {
   input: NativeInputHost;
   interactions: NativeInteractionHost;
+  physics: NativePhysicsHost;
 }
 
 /**
@@ -248,13 +398,21 @@ export function resolveHostSlice<K extends keyof NativeHostSlices>(
   name: K,
   injected: NativeHostSlices[K] | undefined,
 ): NativeHostSlices[K] {
-  const slice = injected ?? (installedHost() as Partial<NativeHostSlices> | undefined)?.[name];
+  const slice = findHostSlice(name, injected);
   if (!slice) {
     throw new Error(
       `@realitycollective/native-interactions: no "${name}" slice was supplied and globalThis.__rcHost.${name} is not installed. Pass one directly, or have the native app install it before this package is constructed.`,
     );
   }
   return slice;
+}
+
+/** The value passed in, or `globalThis.__rcHost`'s slice of that name, or undefined. */
+export function findHostSlice<K extends keyof NativeHostSlices>(
+  name: K,
+  injected: NativeHostSlices[K] | undefined,
+): NativeHostSlices[K] | undefined {
+  return injected ?? (installedHost() as Partial<NativeHostSlices> | undefined)?.[name];
 }
 
 // ---------------------------------------------------------------------------
@@ -303,5 +461,6 @@ export function copySnapshot(source: InputSourceSnapshot): InputSourceSnapshot {
   if (source.angularVelocity) copy.angularVelocity = copyVec3(source.angularVelocity);
   if (source.nativeGrabbing !== undefined) copy.nativeGrabbing = source.nativeGrabbing;
   if (source.hapticsAvailable !== undefined) copy.hapticsAvailable = source.hapticsAvailable;
+  if (source.selectorPose) copy.selectorPose = copyPose(source.selectorPose);
   return copy;
 }

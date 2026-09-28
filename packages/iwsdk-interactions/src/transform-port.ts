@@ -8,6 +8,14 @@
  * `export * from 'three'`: a consumer that excludes `three` from Vite's
  * dependency optimizer cannot resolve names that only exist behind that star.
  * One three instance is what the peer dependency gives every flat install.
+ *
+ * With a physics body (`options.physics`, the platform's `PhysicsFacility`
+ * and the body's id) the port applies the core held-pose rule through the
+ * facility, the same pattern `ThreeTransformPort` uses over `RapierPhysicsFacility`:
+ * `beginHold` suspends the body, `endHold` resumes it with the release
+ * velocity, and `setWorldPose` teleports it with velocity cleared while not
+ * held (the facility also writes the object3D). Without one the object is
+ * simply placed, as before.
  */
 import {
   Matrix4,
@@ -19,30 +27,23 @@ import {
   type Object3D,
 } from "three";
 import type { PoseTuple, QuatTuple, Vec3Tuple } from "@realitycollective/webxr-input";
-import type { HoldRelease, TransformPort } from "@realitycollective/webxr-interactions";
+import type { HoldRelease, PhysicsFacility, TransformPort } from "@realitycollective/webxr-interactions";
 
-/**
- * What drives `beginHold`/`endHold`/the held-vs-reset split of `setWorldPose`
- * on an entity with physics - built by `IWSDKInteractions.register` (which
- * has the `Entity`/`World` this port itself never touches) from
- * `@iwsdk/core`'s `PhysicsBody`/`PhysicsShape`/`PhysicsManipulation`
- * components and `PhysicsSystem.setBodyTransform`, documented next to that
- * code. Kept as a small seam here rather than importing `@iwsdk/core` into
- * this file, the same reason `NativeTransformPort` forwards to a host slice
- * instead of holding ECS details itself.
- */
-export interface IWSDKPhysicsBinding {
-  /** Suspend physics: `setWorldPose` writes the object3D directly until `endHold`. */
-  beginHold(): void;
-  /** Resume physics with `release` as the body's new velocity. */
-  endHold(release: HoldRelease): void;
-  /** Place the object while NOT held: teleport it, with velocities cleared. */
-  teleport(pose: PoseTuple): void;
+/** The body a port drives through the platform's physics facility. */
+export interface IWSDKTransformPortPhysics {
+  facility: PhysicsFacility;
+  /** The body's id in the facility, the interactable's own id. */
+  bodyId: string;
 }
 
 export interface IWSDKTransformPortOptions {
-  /** Present only when the entity has a physics body - see {@link IWSDKPhysicsBinding}. */
-  physics?: IWSDKPhysicsBinding;
+  /**
+   * Present when the entity has a physics body: the port then gains
+   * `beginHold`/`endHold` and its `setWorldPose` goes through the facility
+   * (a teleport with velocity cleared while not held, an exact write while
+   * held). Absent, the port has no hold members and only places the object.
+   */
+  physics?: IWSDKTransformPortPhysics;
 }
 
 export class IWSDKTransformPort implements TransformPort {
@@ -51,8 +52,7 @@ export class IWSDKTransformPort implements TransformPort {
   private readonly restQuaternion = new Quaternion();
   private readonly restScale = new Vector3();
   private baseEmissive: number | null = null;
-  private readonly physics: IWSDKPhysicsBinding | undefined;
-  private held = false;
+  private readonly physics: IWSDKTransformPortPhysics | undefined;
 
   private readonly v = new Vector3();
   private readonly q = new Quaternion();
@@ -67,15 +67,9 @@ export class IWSDKTransformPort implements TransformPort {
     this.physics = options.physics;
     this.recaptureRest();
     if (this.physics) {
-      const physics = this.physics;
-      this.beginHold = () => {
-        this.held = true;
-        physics.beginHold();
-      };
-      this.endHold = (release) => {
-        this.held = false;
-        physics.endHold(release);
-      };
+      const { facility, bodyId } = this.physics;
+      this.beginHold = () => facility.suspend(bodyId);
+      this.endHold = (release) => facility.resume(bodyId, release);
     }
   }
 
@@ -121,24 +115,32 @@ export class IWSDKTransformPort implements TransformPort {
   setLocalOffset(offset: Vec3Tuple): void {
     this.v.set(offset[0], offset[1], offset[2]).applyQuaternion(this.restQuaternion);
     this.object.position.copy(this.restPosition).add(this.v);
+    this.syncBody();
   }
 
   setLocalRotation(quaternion: QuatTuple): void {
     this.q.set(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
     this.object.quaternion.copy(this.restQuaternion).multiply(this.q);
+    this.syncBody();
+  }
+
+  /** A behaviour's write to the object reaches its body too, as a placement (velocity cleared). */
+  private syncBody(): void {
+    if (!this.physics) return;
+    this.physics.facility.setBodyPose(this.physics.bodyId, this.getWorldPose());
   }
 
   /**
    * Follow a world pose while grabbed, or place the object directly the
    * rest of the time (reset / teleport) - see `TransformPort.setWorldPose`.
-   * On an entity with physics, NOT held delegates entirely to
-   * {@link IWSDKPhysicsBinding.teleport}, which also mirrors the pose onto
-   * this object3D (see that binding's own doc) - writing it again here
-   * would just be the same write twice.
+   * With a body, the facility owns its pose and velocity - held, the write
+   * is exact; not held, it is a teleport that rests the body - and mirrors
+   * it onto this object3D itself (`IWSDKPhysicsFacility.setBodyPose`), so
+   * there is nothing further for the port to write.
    */
   setWorldPose(pose: PoseTuple): void {
-    if (this.physics && !this.held) {
-      this.physics.teleport(pose);
+    if (this.physics) {
+      this.physics.facility.setBodyPose(this.physics.bodyId, pose);
       return;
     }
     const parent = this.object.parent;

@@ -17,11 +17,13 @@ export type {
   NativeInputHost,
   NativeInteractionHost,
   NativeInteractionsTestHost,
+  NativePhysicsHost,
   NativePresenceShown,
 } from "./native-types.js";
 export * from "./provider.js";
 export * from "./hit-tester.js";
 export * from "./transform-port.js";
+export * from "./physics-facility.js";
 export * from "./host.js";
 export { nativeInteractionsHostConformanceCases } from "./conformance.js";
 export type {

@@ -23,7 +23,7 @@ import type {
   Unsubscribe,
   Vec3Tuple,
 } from "@realitycollective/webxr-input";
-import type { HoldRelease } from "@realitycollective/webxr-interactions";
+import { coneHitForSpheres, type HoldRelease, type PointerVisuals, type SphereTarget } from "@realitycollective/webxr-interactions";
 import type {
   NativeHit,
   NativeInputFacts,
@@ -38,6 +38,10 @@ export interface FakeInputHostCapable {
   hints?: boolean;
   pulse?: boolean;
   presence?: boolean;
+  /** The host can pose the gaze (`getEyeGazePose`); `eyeTracking` is the fact, set separately. */
+  eyeGaze?: boolean;
+  /** The host draws the ray and cursor as told (`applyPointerVisuals`). */
+  pointerVisuals?: boolean;
 }
 
 export class FakeInputHost implements NativeInputHost {
@@ -46,6 +50,10 @@ export class FakeInputHost implements NativeInputHost {
   private readonly sourceListeners = new Set<() => void>();
   /** The session's hand-tracking fact. */
   handTracking = false;
+  /** The session's eye-tracking fact. */
+  eyeTracking = false;
+  /** The gaze pose `getEyeGazePose` reports, or null for a frame with no valid pose. */
+  eyeGazePose: PoseTuple | null = { position: [0, 1.6, 0], quaternion: [0, 0, 0, 1] };
   /** Sources reported in place of the pooled one while set. */
   sources: InputSourceSnapshot[] | null = null;
 
@@ -68,14 +76,27 @@ export class FakeInputHost implements NativeInputHost {
   readonly shown: Partial<Record<"left" | "right", NativePresenceShown>> = {};
   /** Cursor discs drawn, which a correct host keeps whatever presence says. */
   cursorPoints: Vec3Tuple[] = [];
+  /** What each source draws now, as last told through `applyPointerVisuals`. */
+  readonly visualsBySource = new Map<string, PointerVisuals>();
+  /** Every `applyPointerVisuals` call, in order. */
+  readonly visualsCalls: Array<[string, PointerVisuals]> = [];
 
   getHeadPose?: () => HeadPose;
+  getEyeGazePose?: () => PoseTuple | null;
   sampleHints?: () => readonly InputHitHint[];
   pulse?: (sourceId: string, intensity: number, durationMs: number) => boolean;
   applyPresence?: (side: "left" | "right", shown: NativePresenceShown) => void;
+  applyPointerVisuals?: (sourceId: string, visuals: PointerVisuals) => void;
 
   constructor(capable: FakeInputHostCapable = {}) {
+    if (capable.pointerVisuals) {
+      this.applyPointerVisuals = (sourceId, visuals) => {
+        this.visualsCalls.push([sourceId, visuals]);
+        this.visualsBySource.set(sourceId, visuals);
+      };
+    }
     if (capable.headPose) this.getHeadPose = () => this.headPoseValue;
+    if (capable.eyeGaze) this.getEyeGazePose = () => this.eyeGazePose;
     if (capable.hints) this.sampleHints = () => this.hints;
     if (capable.pulse) {
       this.pulse = (sourceId, intensity, durationMs) => {
@@ -92,7 +113,7 @@ export class FakeInputHost implements NativeInputHost {
   }
 
   getFacts(): NativeInputFacts {
-    return { immersive: this.live, focused: this.live, handTracking: this.handTracking };
+    return { immersive: this.live, focused: this.live, handTracking: this.handTracking, eyeTracking: this.eyeTracking };
   }
 
   onFactsChanged(listener: () => void): Unsubscribe {
@@ -305,6 +326,7 @@ export class FakeInteractionHost implements NativeInteractionHost {
  */
 export class ReferenceInteractionHost extends FakeInteractionHost implements NativeInteractionsTestHost {
   private readonly targets = new Map<string, { position: Vec3Tuple; radius: number }>();
+  private readonly hiddenTargets = new Set<string>();
   private readonly releases = new Map<string, HoldRelease>();
   private readonly input: FakeInputHost | undefined;
 
@@ -319,6 +341,27 @@ export class ReferenceInteractionHost extends FakeInteractionHost implements Nat
 
   clearTargets(): void {
     this.targets.clear();
+    this.hiddenTargets.clear();
+  }
+
+  setTargetVisible(targetId: string, visible: boolean): void {
+    if (visible) this.hiddenTargets.delete(targetId);
+    else this.hiddenTargets.add(targetId);
+  }
+
+  /** The shown targets as spheres, for the cone query. */
+  private spheres(): SphereTarget[] {
+    const out: SphereTarget[] = [];
+    for (const [id, target] of this.targets) {
+      if (!this.hiddenTargets.has(id)) out.push({ id, center: target.position, radius: target.radius });
+    }
+    return out;
+  }
+
+  /** A correct host's cone query: the core's own rule over its spheres. */
+  hitCone(ray: RayTuple, halfAngle: number, maxLength: number): NativeHit | null {
+    const hit = coneHitForSpheres(ray, this.spheres(), halfAngle, maxLength);
+    return hit ? { targetId: hit.interactableId, distance: hit.distance, point: [...hit.point] } : null;
   }
 
   override setTargetRadius(targetId: string, radius: number): void {
@@ -343,13 +386,23 @@ export class ReferenceInteractionHost extends FakeInteractionHost implements Nat
     return this.input?.shown[side];
   }
 
+  /** A correct host draws a cursor exactly where it was told to, and its own test discs. */
   cursors(): Vec3Tuple[] {
-    return (this.input?.cursorPoints ?? []).map((point) => [...point] as Vec3Tuple);
+    const told: Vec3Tuple[] = [];
+    for (const visuals of this.input?.visualsBySource.values() ?? []) {
+      if (visuals.cursor && visuals.cursorPoint) told.push([...visuals.cursorPoint] as Vec3Tuple);
+    }
+    return [...(this.input?.cursorPoints ?? []).map((point) => [...point] as Vec3Tuple), ...told];
+  }
+
+  pointerVisuals(sourceId: string): PointerVisuals | undefined {
+    return this.input?.visualsBySource.get(sourceId);
   }
 
   override hitRay(ray: RayTuple): NativeHit | null {
     let best: NativeHit | null = null;
     for (const [id, target] of this.targets) {
+      if (this.hiddenTargets.has(id)) continue;
       const t =
         (target.position[0] - ray.origin[0]) * ray.direction[0] +
         (target.position[1] - ray.origin[1]) * ray.direction[1] +
@@ -370,6 +423,7 @@ export class ReferenceInteractionHost extends FakeInteractionHost implements Nat
   override hitProximity(point: Vec3Tuple, radius: number): NativeHit | null {
     let best: NativeHit | null = null;
     for (const [id, target] of this.targets) {
+      if (this.hiddenTargets.has(id)) continue;
       const surface =
         Math.hypot(target.position[0] - point[0], target.position[1] - point[1], target.position[2] - point[2]) -
         target.radius;

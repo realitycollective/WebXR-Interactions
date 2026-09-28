@@ -29,7 +29,12 @@
  */
 import { Raycaster, type BufferGeometry, type Intersection, type Mesh, type Object3D } from "three";
 import type { RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
-import type { HitTester, InteractableHit } from "@realitycollective/webxr-interactions";
+import {
+  coneHitForSpheres,
+  type HitTester,
+  type InteractableHit,
+  type SphereTarget,
+} from "@realitycollective/webxr-interactions";
 
 /** What three-mesh-bvh adds to a geometry once its prototype hooks are installed. */
 interface BvhGeometryLike {
@@ -152,6 +157,34 @@ export class ThreeHitTester implements HitTester {
       }
     }
     return best;
+  }
+
+  /**
+   * The eye-gaze cone (`ports.ts`, `hitCone`): a mesh the raycast reaches
+   * within `maxLength` wins outright, as IWSDK's conecaster lets the raw
+   * gaze ray win; otherwise the cone runs over each root's bounding sphere
+   * (world position, geometry radius scaled by the world scale, or the
+   * registered radius for a bare group), the same sphere `hitProximity`
+   * uses. A root hidden by `visible` on itself or an ancestor is skipped.
+   */
+  hitCone(ray: RayTuple, halfAngle: number, maxLength: number): InteractableHit | null {
+    const direct = this.hitRay(ray);
+    if (direct && direct.distance <= maxLength) return direct;
+    const spheres: SphereTarget[] = [];
+    for (const [id, object] of this.roots) {
+      if (!isVisibleChain(object)) continue;
+      object.updateWorldMatrix(true, false);
+      const e = object.matrixWorld.elements as Matrix4Elements;
+      const scale = Math.max(
+        Math.hypot(e[0], e[1], e[2]),
+        Math.hypot(e[4], e[5], e[6]),
+        Math.hypot(e[8], e[9], e[10]),
+      );
+      const radius = radiusOf(object, this.targetRadii.get(id) ?? DEFAULT_TARGET_RADIUS) * scale;
+      spheres.push({ id, center: [e[12], e[13], e[14]], radius });
+    }
+    const hit = coneHitForSpheres(ray, spheres, halfAngle, maxLength);
+    return hit ? { interactableId: hit.interactableId, distance: hit.distance, point: hit.point } : null;
   }
 
   private objects(): Object3D[] {

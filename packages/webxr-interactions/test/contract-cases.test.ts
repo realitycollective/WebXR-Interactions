@@ -21,9 +21,11 @@ import {
   type QuatTuple,
   type TransformPort,
   type TransformPortContractSubject,
+  coneHitForSpheres,
   quatMultiply,
   vAdd,
   vApplyQuat,
+  type SphereTarget,
 } from "../src/index.js";
 import type { RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 
@@ -37,6 +39,11 @@ const RAY_AWAY = "a ray pointing away from the target returns null";
 const PROXIMITY = "hitProximity finds a target inside its radius and misses outside it";
 const NEARER = "with two targets on one ray, the nearer one wins";
 const FRESH_HIT = "each hit and its point are fresh values the caller owns";
+const CONE_DIRECT = "hitCone, when present, answers a ray that reaches a target with that target at angular distance zero";
+const CONE_NEAR = "hitCone, when present, finds a target inside the cone that the ray itself misses";
+const CONE_OUTSIDE = "hitCone, when present, ignores a target outside the cone and one beyond the length";
+const CONE_PREFER = "hitCone, when present, prefers the target nearer the axis, and the nearer of two on the axis";
+const CONE_HIDDEN = "hitCone, when present, never answers with a target hidden by visible alone, when the driver can toggle it";
 
 /** One deliberate defect at a time, so each broken-fake test names the case it breaks. */
 interface HitTesterFakeConfig {
@@ -66,6 +73,14 @@ interface HitTesterFakeConfig {
   ignoresDefaultRadius?: boolean;
   /** Never excludes a target setVisible(id, false) hid. */
   ignoresVisible?: boolean;
+  /** No hitCone at all: the optional member is left out. */
+  noCone?: boolean;
+  /** hitCone answers any placed target, however far off the axis or beyond the length. */
+  coneIgnoresAngle?: boolean;
+  /** hitCone keeps the farther of two on-axis targets. */
+  coneFarther?: boolean;
+  /** hitCone still answers with a hidden target. */
+  coneIgnoresVisible?: boolean;
 }
 
 const BARE_RADIUS = 0.1;
@@ -74,7 +89,32 @@ class FakeHitTesterHost implements HitTester {
   private readonly targets = new Map<string, { position: Vec3Tuple; radius: number }>();
   private readonly hidden = new Set<string>();
 
-  constructor(private readonly config: HitTesterFakeConfig = {}) {}
+  hitCone?: (ray: RayTuple, halfAngle: number, maxLength: number) => InteractableHit | null;
+
+  constructor(private readonly config: HitTesterFakeConfig = {}) {
+    if (!config.noCone) {
+      this.hitCone = (ray, halfAngle, maxLength) => {
+        const spheres: SphereTarget[] = [];
+        for (const [id, target] of this.targets) {
+          if (!config.coneIgnoresVisible && !this.showing(id)) continue;
+          spheres.push({ id, center: target.position, radius: target.radius });
+        }
+        if (config.coneIgnoresAngle) {
+          const first = spheres[0];
+          return first ? { interactableId: first.id, distance: dist(ray.origin, first.center), point: first.center } : null;
+        }
+        if (config.coneFarther) {
+          let farthest: InteractableHit | null = null;
+          for (const sphere of spheres) {
+            const hit = coneHitForSpheres(ray, [sphere], halfAngle, maxLength);
+            if (hit && (!farthest || hit.distance > farthest.distance)) farthest = hit;
+          }
+          return farthest;
+        }
+        return coneHitForSpheres(ray, spheres, halfAngle, maxLength);
+      };
+    }
+  }
 
   place(id: string, position: Vec3Tuple, radius: number): void {
     this.targets.set(id, { position, radius });
@@ -277,6 +317,32 @@ describe("hitTesterContractCases catches a broken host", () => {
         ignoresVisible: true,
       }),
     ).toThrow(/must not hit a target hidden by visible alone/);
+  });
+
+  it("skips every cone case on a tester with no hitCone", () => {
+    for (const name of [CONE_DIRECT, CONE_NEAR, CONE_OUTSIDE, CONE_PREFER, CONE_HIDDEN]) {
+      expect(() => runHitTesterCase(name, { noCone: true })).not.toThrow();
+    }
+  });
+
+  it("rejects a hitCone that answers targets outside the cone or beyond the length", () => {
+    expect(() => runHitTesterCase(CONE_OUTSIDE, { coneIgnoresAngle: true })).toThrow(/outside the cone or beyond the length/);
+  });
+
+  it("rejects a hitCone that keeps the farther of two on-axis targets", () => {
+    expect(() => runHitTesterCase(CONE_PREFER, { coneFarther: true })).toThrow(/did not prefer the nearer/);
+  });
+
+  it("rejects a hitCone that still answers with a hidden target", () => {
+    expect(() => runHitTesterCase(CONE_HIDDEN, { coneIgnoresVisible: true })).toThrow(/hidden target/);
+  });
+
+  it("rejects a hitCone that cannot find a target the ray misses inside the cone", () => {
+    // A tester whose cone is only a ray test: hitCone answers as hitRay does.
+    const host = new FakeHitTesterHost();
+    host.hitCone = (ray) => host.hitRay(ray);
+    const contractCase = hitTesterContractCases().find((entry) => entry.name === CONE_NEAR)!;
+    expect(() => contractCase.run({ hitTester: host, driver: host })).toThrow(/did not find the target inside the cone/);
   });
 
   it("fails loudly when asked for a case that does not exist", () => {
@@ -591,6 +657,32 @@ describe("transformPortContractCases catches a broken port", () => {
     expect(() =>
       runTransformPortCase(RESET, { hasSetWorldPose: true, hasPhysics: true, resetKeepsVelocity: true }),
     ).toThrow(/getWorldPose\(\) one step after a reset setWorldPose/);
+  });
+
+  it("skips every cone case on a tester with no hitCone", () => {
+    for (const name of [CONE_DIRECT, CONE_NEAR, CONE_OUTSIDE, CONE_PREFER, CONE_HIDDEN]) {
+      expect(() => runHitTesterCase(name, { noCone: true })).not.toThrow();
+    }
+  });
+
+  it("rejects a hitCone that answers targets outside the cone or beyond the length", () => {
+    expect(() => runHitTesterCase(CONE_OUTSIDE, { coneIgnoresAngle: true })).toThrow(/outside the cone or beyond the length/);
+  });
+
+  it("rejects a hitCone that keeps the farther of two on-axis targets", () => {
+    expect(() => runHitTesterCase(CONE_PREFER, { coneFarther: true })).toThrow(/did not prefer the nearer/);
+  });
+
+  it("rejects a hitCone that still answers with a hidden target", () => {
+    expect(() => runHitTesterCase(CONE_HIDDEN, { coneIgnoresVisible: true })).toThrow(/hidden target/);
+  });
+
+  it("rejects a hitCone that cannot find a target the ray misses inside the cone", () => {
+    // A tester whose cone is only a ray test: hitCone answers as hitRay does.
+    const host = new FakeHitTesterHost();
+    host.hitCone = (ray) => host.hitRay(ray);
+    const contractCase = hitTesterContractCases().find((entry) => entry.name === CONE_NEAR)!;
+    expect(() => contractCase.run({ hitTester: host, driver: host })).toThrow(/did not find the target inside the cone/);
   });
 
   it("fails loudly when asked for a case that does not exist", () => {

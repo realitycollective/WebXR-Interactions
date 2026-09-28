@@ -33,7 +33,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-input": "^0.1.4",
+    "@realitycollective/webxr-input": "^0.1.7",
     "@realitycollective/webxr-interactions": "^0.1.1-preview.3"
   },
   "peerDependencies": {
@@ -46,9 +46,10 @@
     }
   },
   "devDependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "@types/three": "*",
     "three": "npm:super-three@0.181.0",
-    "three-mesh-bvh": "^0.9.14",
-    "@types/three": "*"
+    "three-mesh-bvh": "^0.9.14"
   },
   "repository": {
     "type": "git",

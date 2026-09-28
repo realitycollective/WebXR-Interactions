@@ -6,5 +6,6 @@
 export * from "@realitycollective/webxr-interactions";
 
 export * from "./provider.js";
+export * from "./physics-facility.js";
 export * from "./transform-port.js";
 export * from "./register.js";

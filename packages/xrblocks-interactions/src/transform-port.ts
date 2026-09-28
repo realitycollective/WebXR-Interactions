@@ -11,13 +11,20 @@
  * an XR Blocks `Script` is an ordinary three.js `Object3D` - this class
  * "behaves as `ThreeTransformPort` when there is no body", per the
  * `TransformPort.beginHold`/`endHold` doc, by simply never gaining those
- * two members when no `rigidBody` is supplied at construction, the same
- * rule `BabylonTransformPort` follows for a node with no `physicsBody`.
+ * two members when no body is supplied at construction, the same rule
+ * `BabylonTransformPort` follows for a node with no `physicsBody`.
+ *
+ * Two ways to give the port a body. `physics` (the platform facility and
+ * the body's id, the same option `ThreeTransformPort` takes) is the rule
+ * every binding now follows: the held pose goes through the core
+ * `PhysicsFacility` contract, Rapier by default on XR Blocks. `rigidBody`
+ * with `rigidBodyTypes`, a bare RAPIER body the app drives itself, is kept
+ * for apps written against it and behaves as before.
  */
 import type { Object3D } from "three";
 import type { PoseTuple, QuatTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import type { HoldRelease, TransformPort } from "@realitycollective/webxr-interactions";
-import { ThreeTransformPort } from "@realitycollective/threejs-interactions";
+import { ThreeTransformPort, type TransformPortPhysics } from "@realitycollective/threejs-interactions";
 
 /** Structural slice of a RAPIER `Vector` reading/argument (`rapier3d`/`@dimforge/rapier3d-compat`). */
 export interface RapierVectorLike {
@@ -73,9 +80,15 @@ export interface RapierRigidBodyTypes {
 
 export interface XRBlocksTransformPortOptions {
   /**
-   * The RAPIER rigid body backing `object`, when XR Blocks physics owns it.
-   * `beginHold`/`endHold` exist on the port only when BOTH this and
-   * `rigidBodyTypes` are supplied - an object with no body, or a
+   * The platform physics facility and this object's body id in it: the
+   * port then applies the core held-pose rule through the facility, as
+   * `ThreeTransformPort` does. Takes precedence over `rigidBody`.
+   */
+  physics?: TransformPortPhysics;
+  /**
+   * The RAPIER rigid body backing `object`, when the app drives XR Blocks
+   * physics itself. `beginHold`/`endHold` exist on the port only when BOTH
+   * this and `rigidBodyTypes` are supplied - an object with no body, or a
    * construction with no `rigidBodyTypes`, gets neither member and behaves
    * exactly as `ThreeTransformPort`.
    */
@@ -94,7 +107,15 @@ export class XRBlocksTransformPort implements TransformPort {
   readonly endHold?: (release: HoldRelease) => void;
 
   constructor(object: Object3D, options: XRBlocksTransformPortOptions = {}) {
-    this.base = new ThreeTransformPort(object);
+    this.base = new ThreeTransformPort(object, options.physics ? { physics: options.physics } : {});
+    if (options.physics) {
+      // The facility owns the body: the three.js port's own hold members
+      // suspend and resume it there, and its pose writes reach it.
+      this.body = undefined;
+      this.beginHold = () => this.base.beginHold!();
+      this.endHold = (release) => this.base.endHold!(release);
+      return;
+    }
     this.body = options.rigidBody;
     const types = options.rigidBodyTypes;
     if (this.body && types) {

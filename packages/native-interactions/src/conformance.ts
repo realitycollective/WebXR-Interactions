@@ -17,16 +17,22 @@
  */
 import {
   hitTesterContractCases,
+  nearPointerContractCases,
+  physicsFacilityContractCases,
   type HoldRelease,
+  type PointerVisuals,
 } from "@realitycollective/webxr-interactions";
 import { NativeHitTester } from "./hit-tester.js";
 import { NativeInteractions } from "./host.js";
+import { NativePhysicsFacility } from "./physics-facility.js";
 import { NativeInputProvider } from "./provider.js";
 import { NativeTransformPort } from "./transform-port.js";
+import type { Vec3Tuple } from "@realitycollective/webxr-input";
 import type {
   NativeInputHost,
   NativeInteractionHost,
   NativeInteractionsTestHost,
+  NativePhysicsHost,
   NativePresenceShown,
 } from "./native-types.js";
 
@@ -35,9 +41,11 @@ export interface NativeInteractionsHostConformanceSetup {
   input: NativeInputHost;
   interactions: NativeInteractionHost;
   testHost: NativeInteractionsTestHost;
+  /** The `physics` slice. A host that installs none fails the physics cases. */
+  physics?: NativePhysicsHost;
 }
 
-/** One check a native host must pass. `name` is `interactions/<row>` or `input/<row>`. */
+/** One check a native host must pass. `name` is `interactions/<row>`, `input/<row>` or `physics/<row>`. */
 export interface NativeInteractionsHostConformanceCase {
   name: string;
   run(setup: NativeInteractionsHostConformanceSetup): Promise<void>;
@@ -76,8 +84,95 @@ export function nativeInteractionsHostConformanceCases(): NativeInteractionsHost
     }),
   );
 
+  // The near-pointer rule over the host's real queries: touch press, grip
+  // grab, pointer priority and what the ray and cursor should show.
+  const nearCases = nearPointerContractCases().map((contractCase) =>
+    hostCase(`interactions/${contractCase.name}`, ({ interactions, testHost }, name) => {
+      testHost.clearTargets();
+      try {
+        contractCase.run({
+          hitTester: new NativeHitTester({ interactions }),
+          driver: { place: (id, position, radius) => testHost.placeTarget(id, position, radius) },
+        });
+      } catch (error) {
+        fail(name, (error as Error).message);
+      } finally {
+        testHost.clearTargets();
+      }
+    }),
+  );
+
+  // The platform's physics behind the core contract: the whole shared suite
+  // over the host's engine, on the device.
+  const physicsCases = physicsFacilityContractCases().map((contractCase) =>
+    hostCase(`physics/${contractCase.name}`, ({ physics }, name) => {
+      if (!physics) fail(name, "the host installs no physics slice; every native platform names a default engine (Jolt on Quest and Android, RealityKit on visionOS)");
+      const facility = new NativePhysicsFacility({ physics });
+      try {
+        contractCase.run({ facility });
+      } catch (error) {
+        fail(name, (error as Error).message);
+      } finally {
+        facility.dispose();
+      }
+    }),
+  );
+
   return [
     ...hitCases,
+    ...nearCases,
+    ...physicsCases,
+    hostCase("physics/a registered target with a body is held and released through the physics slice", ({ input, interactions, physics, testHost }, name) => {
+      if (!physics) fail(name, "the host installs no physics slice");
+      testHost.clearTargets();
+      const setup = new NativeInteractions({ input, interactions, physics });
+      try {
+        testHost.placeTarget("rc-kit-body", [0, 1, -1], 0.1);
+        const port = setup.register({ id: "rc-kit-body", behaviours: [{ kind: "grab" }] }, { shape: { kind: "sphere", dimensions: [0.1, 0, 0] } });
+        if (!physics.hasBody("rc-kit-body")) fail(name, "register with a shape must add a body to the physics slice");
+        port.beginHold();
+        if (!physics.isSuspended("rc-kit-body")) fail(name, "beginHold on a target with a body must suspend it in the physics slice");
+        port.endHold({ linearVelocity: [1, 0, 0], angularVelocity: [0, 0, 0] });
+        if (physics.isSuspended("rc-kit-body")) fail(name, "endHold must resume the body");
+        const velocity = physics.getVelocity("rc-kit-body").linear;
+        if (Math.abs(velocity[0] - 1) > 0.01) fail(name, `endHold must hand the body the release velocity, it has ${JSON.stringify(velocity)}`);
+        setup.unregister("rc-kit-body");
+        if (physics.hasBody("rc-kit-body")) fail(name, "unregister must remove the body the binding added");
+      } finally {
+        setup.dispose();
+        testHost.clearTargets();
+      }
+    }),
+    hostCase("input/the ray and cursor are drawn exactly as told", ({ input, testHost }, name) => {
+      // The binding decides the ray and cursor per source (the near-pointer
+      // rule) and hands the host the result; a host that draws its own ray
+      // or a cursor at every ray hit fails here, as the Quest host did when
+      // it kept the cursor on a touched object.
+      if (typeof input.applyPointerVisuals !== "function") {
+        fail(name, "the host has no applyPointerVisuals, so it cannot hide the ray while a hand touches something");
+      }
+      if (typeof testHost.pointerVisuals !== "function") {
+        fail(name, "the test host has no pointerVisuals readback");
+      }
+      const touched: PointerVisuals = { sourceId: "rc-kit-source", activePointer: "touch", ray: false, cursor: true, cursorPoint: [0, 1, -0.9] };
+      input.applyPointerVisuals("rc-kit-source", { ...touched });
+      const drawn = testHost.pointerVisuals("rc-kit-source");
+      if (!drawn || drawn.ray || !drawn.cursor || JSON.stringify(drawn.cursorPoint) !== JSON.stringify(touched.cursorPoint)) {
+        fail(name, `told ${JSON.stringify(touched)}, the host draws ${JSON.stringify(drawn)}`);
+      }
+      if (!testHost.cursors().some((point) => JSON.stringify(point) === JSON.stringify(touched.cursorPoint))) {
+        fail(name, "the host draws no cursor disc at the point it was told");
+      }
+      const idle: PointerVisuals = { sourceId: "rc-kit-source", activePointer: null, ray: true, cursor: false, cursorPoint: null };
+      input.applyPointerVisuals("rc-kit-source", { ...idle });
+      const after = testHost.pointerVisuals("rc-kit-source");
+      if (!after || !after.ray || after.cursor) {
+        fail(name, `told ${JSON.stringify(idle)}, the host draws ${JSON.stringify(after)}`);
+      }
+      if (testHost.cursors().some((point) => JSON.stringify(point) === JSON.stringify(touched.cursorPoint))) {
+        fail(name, "the host still draws the cursor disc after being told to stop");
+      }
+    }),
     hostCase("interactions/a registered target with no radius is a 10 cm sphere", ({ input, interactions, testHost }, name) => {
       testHost.clearTargets();
       const setup = new NativeInteractions({ input, interactions });
@@ -154,6 +249,49 @@ export function nativeInteractionsHostConformanceCases(): NativeInteractionsHost
         }
       } finally {
         provider.dispose();
+      }
+    }),
+    hostCase("input/eye gaze: a host that reports eye tracking poses the gaze, and the binding takes far targeting", ({ input }, name) => {
+      // Runs when the host reports eye tracking; a host without it (visionOS,
+      // a Quest without eye tracking) passes without running. With it, the
+      // host must hand the binding a valid pose in a live, focused session,
+      // and the binding then samples one gaze snapshot with a ray. That the
+      // hand and controller far rays drop is the shared contract case.
+      if (!input.getFacts().eyeTracking) return;
+      if (typeof input.getEyeGazePose !== "function") {
+        fail(name, "the host reports eyeTracking but has no getEyeGazePose(); the binding cannot use a fact it cannot pose");
+      }
+      const provider = new NativeInputProvider({ input });
+      try {
+        if (!provider.getCapabilities().eyeGaze) {
+          fail(name, "the host reports eyeTracking in a live session, so capabilities.eyeGaze must be true; is the session focused?");
+        }
+        const pose = input.getEyeGazePose();
+        if (!pose || [...pose.position, ...pose.quaternion].some((n) => !Number.isFinite(n))) {
+          fail(name, `getEyeGazePose() returned ${JSON.stringify(pose)}; run the kit while the user's eyes are tracked`);
+        }
+        const gaze = provider.sample().find((source) => source.kind === "gaze");
+        if (!gaze?.ray) fail(name, "with a valid gaze pose the binding must sample one gaze snapshot with a ray");
+      } finally {
+        provider.dispose();
+      }
+    }),
+    hostCase("input/eye gaze: a cone query never answers with a hidden target", ({ interactions, testHost }, name) => {
+      if (!interactions.hitCone) return;
+      testHost.clearTargets();
+      try {
+        testHost.placeTarget("rc-kit-cone", [0.2, 1, -2], 0.1);
+        const ray = { origin: [0, 1, 0] as Vec3Tuple, direction: [0, 0, -1] as Vec3Tuple };
+        const shown = interactions.hitCone(ray, (5 * Math.PI) / 180, 30);
+        if (!shown || shown.targetId !== "rc-kit-cone") {
+          fail(name, "a target 0.2 m beside a ray 2 m out, inside a 5 degree cone, was not found");
+        }
+        testHost.setTargetVisible?.("rc-kit-cone", false);
+        if (testHost.setTargetVisible && interactions.hitCone(ray, (5 * Math.PI) / 180, 30) !== null) {
+          fail(name, "the cone query answered with a hidden target");
+        }
+      } finally {
+        testHost.clearTargets();
       }
     }),
     hostCase("input/presence never hides the cursors", ({ input, testHost }, name) => {

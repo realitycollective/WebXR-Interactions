@@ -1,0 +1,209 @@
+/**
+ * Near pointers - the touch press, the grip grab, which pointer owns a hand
+ * and what that means for the ray and cursor. Pure logic, no engine.
+ *
+ * The template is IWSDK 1.0.0's pointer stack (`@iwsdk/xr-input`
+ * `multi-pointer.js`, `touch-pointer.js`, `grab-pointer.js`, over
+ * `@pmndrs/pointer-events`), restated here so every binding runs the same
+ * rule from the facts it already reports (`indexTip`, `gripPose`, `ray`):
+ *
+ * - **Touch.** A fingertip (a controller's ray origin stands in for one)
+ *   hovers a target once its distance to the target's SURFACE is within
+ *   `touchHoverEnter` (0.15 m) and keeps hovering until it is beyond
+ *   `touchHoverExit` (0.2 m): `TOUCH_HYSTERESIS`. It presses while that
+ *   distance is at or under `touchDown` (0.02 m): `TOUCH_DEFAULTS.downRadius`,
+ *   which `@pmndrs/pointer-events` compares every frame, so the release is
+ *   the way out past the same distance.
+ * - **Grab.** The grip is a sphere of `grabRadius` (0.07 m,
+ *   `createGrabPointer`'s default) and a target whose surface it reaches is
+ *   the grab candidate. The squeeze (or a hand's pinch on a grab-only
+ *   target) then grabs it.
+ * - **Priority.** Per source, the first of touch, grab, ray with a candidate
+ *   is the active pointer (`PRIORITY_ORDER`), and once it is pressing or
+ *   grabbing it stays active until the release (IWSDK's selection lock).
+ * - **Visuals.** The ray and its cursor show only while the ray is the active
+ *   pointer or nothing is (`shouldHideRay`); a near pointer owning the hand
+ *   hides them, and the shared cursor sits at the active pointer's hit point.
+ *
+ * One rule is deliberately stricter than the template, as the Pale Signal
+ * work order of 28 September 2026 required: a touch never presses from inside
+ * or from behind. A fingertip first seen already within the press band, a
+ * hand that pops into tracking inside the target, does not press until it has
+ * been seen outside the band and comes back in. IWSDK's touch pointer would
+ * press on that first frame; `touch-reference.test.ts` records the one frame
+ * on which the two differ, and that they agree everywhere else.
+ */
+
+/** The pointer that owns a source this frame. `"gaze"` is the eye-gaze source's own pointer. */
+export type ActivePointerKind = "touch" | "grab" | "ray" | "gaze";
+
+/** IWSDK's order: the first with a candidate wins. `multi-pointer.js` `PRIORITY_ORDER`. */
+export const POINTER_PRIORITY: readonly ActivePointerKind[] = Object.freeze(["touch", "grab", "ray"]);
+
+export interface NearPointerOptions {
+  /** Surface distance, metres, within which a fingertip starts hovering a target. IWSDK `enterHoverDistance` 0.15. */
+  touchHoverEnter: number;
+  /** Surface distance, metres, beyond which a hovering fingertip stops hovering. IWSDK `exitHoverDistance` 0.2. Never less than `touchHoverEnter`. */
+  touchHoverExit: number;
+  /** Surface distance, metres, at or under which a hovering fingertip presses, and above which it releases. IWSDK `downRadius` 0.02. */
+  touchDown: number;
+  /** Radius, metres, of the grip sphere that finds a grab candidate. `createGrabPointer` default 0.07. */
+  grabRadius: number;
+}
+
+/** IWSDK 1.0.0's constants: `TOUCH_HYSTERESIS`, `TOUCH_DEFAULTS.downRadius`, `createGrabPointer`'s radius. */
+export const NEAR_POINTER_DEFAULTS: Readonly<NearPointerOptions> = Object.freeze({
+  touchHoverEnter: 0.15,
+  touchHoverExit: 0.2,
+  touchDown: 0.02,
+  grabRadius: 0.07,
+});
+
+export function resolveNearPointerOptions(options: Partial<NearPointerOptions> = {}): NearPointerOptions {
+  const resolved = { ...NEAR_POINTER_DEFAULTS, ...options };
+  if (resolved.touchDown < 0 || resolved.touchHoverEnter < 0 || resolved.grabRadius < 0) {
+    throw new Error("[webxr-interactions] near pointer distances must be >= 0");
+  }
+  if (resolved.touchHoverExit < resolved.touchHoverEnter) {
+    throw new Error(
+      `[webxr-interactions] touchHoverExit (${resolved.touchHoverExit}) must be >= touchHoverEnter (${resolved.touchHoverEnter})`,
+    );
+  }
+  return resolved;
+}
+
+/** What the touch machine reports after one frame. */
+export interface TouchPointerUpdate {
+  /** The fingertip is hovering a target this frame (the touch pointer has a candidate). */
+  hovering: boolean;
+  /** The touch is pressing this frame. */
+  pressed: boolean;
+  /** True on the exact frame a press started. */
+  pressStarted: boolean;
+  /** True on the exact frame a press ended. */
+  pressEnded: boolean;
+}
+
+/**
+ * One source's touch pointer: hover with hysteresis, press at `touchDown`
+ * armed only from outside the band. Feed it the fingertip's surface distance
+ * to the nearest target each frame, or `null` when no target is in reach.
+ */
+export class TouchPointerState {
+  private hovering = false;
+  private pressed = false;
+  /** The fingertip has been seen outside the press band since it last lost contact. */
+  private armed = false;
+
+  get isHovering(): boolean {
+    return this.hovering;
+  }
+
+  get isPressed(): boolean {
+    return this.pressed;
+  }
+
+  /**
+   * Advance one frame. `enter`/`exit` are the hover band for the target in
+   * question (an interactable may widen the default), `down` the press
+   * distance.
+   */
+  update(distance: number | null, enter: number, exit: number, down: number): TouchPointerUpdate {
+    const wasPressed = this.pressed;
+    const threshold = this.hovering ? exit : enter;
+    if (distance === null || distance > threshold) {
+      this.hovering = false;
+      this.pressed = false;
+      this.armed = false;
+      return { hovering: false, pressed: false, pressStarted: false, pressEnded: wasPressed };
+    }
+    this.hovering = true;
+    if (distance > down) {
+      // Outside the press band: released if it was pressing, and armed for the next press.
+      this.armed = true;
+      this.pressed = false;
+      return { hovering: true, pressed: false, pressStarted: false, pressEnded: wasPressed };
+    }
+    // Within the press band. IWSDK presses here unconditionally; the core
+    // requires the fingertip to have arrived from outside (see the file comment).
+    if (!this.pressed && this.armed) {
+      this.pressed = true;
+      this.armed = false;
+      return { hovering: true, pressed: true, pressStarted: true, pressEnded: false };
+    }
+    return { hovering: true, pressed: this.pressed, pressStarted: false, pressEnded: false };
+  }
+
+  /** Drop everything without reporting (the source went away). */
+  reset(): void {
+    this.hovering = false;
+    this.pressed = false;
+    this.armed = false;
+  }
+}
+
+/** A candidate one pointer found: the target and the point the cursor sits at. */
+export interface PointerCandidate {
+  targetId: string;
+  /** World-space point: the ray's hit, or the closest point of a near target. */
+  point: readonly [number, number, number];
+  /** Metres: the ray parameter for a ray, the surface distance for a near pointer. */
+  distance: number;
+}
+
+/**
+ * IWSDK's `pickActiveByPriority` with its selection lock: while the current
+ * active pointer is selecting it stays; otherwise the first pointer in
+ * `POINTER_PRIORITY` with a candidate wins, or none.
+ */
+export function pickActivePointer(
+  candidates: { touch: boolean; grab: boolean; ray: boolean },
+  current: ActivePointerKind | null,
+  selecting: boolean,
+): ActivePointerKind | null {
+  if (selecting && current !== null) return current;
+  for (const kind of POINTER_PRIORITY) {
+    if (candidates[kind as "touch" | "grab" | "ray"]) return kind;
+  }
+  return null;
+}
+
+/**
+ * What a binding shows for one source: IWSDK's `shouldHideRay` and the shared
+ * cursor from `MultiPointer.update`. A host draws exactly this and decides
+ * nothing.
+ */
+export interface PointerVisuals {
+  /** The source these visuals belong to. */
+  sourceId: string;
+  /** The pointer owning the source, or null when none has a candidate. */
+  activePointer: ActivePointerKind | null;
+  /**
+   * Draw this source's ray. True while the source has a ray and no near
+   * pointer owns it: the ray is active, or nothing is. False while touch or
+   * grab owns the hand, while eye gaze has taken the far ray, and for a
+   * source with no ray at all.
+   */
+  ray: boolean;
+  /**
+   * Draw the cursor disc at `cursorPoint`. True exactly while the active
+   * pointer has a candidate: at the ray's hit, or on the surface the
+   * fingertip or grip reaches. Never drawn "at every ray hit" regardless of
+   * ownership, which is what the September 2026 native contract said.
+   */
+  cursor: boolean;
+  /** World-space cursor position while `cursor` is true, else null. */
+  cursorPoint: readonly [number, number, number] | null;
+}
+
+/** Build the visuals for one source from its active pointer and that pointer's candidate. */
+export function pointerVisualsFor(
+  sourceId: string,
+  hasRay: boolean,
+  active: ActivePointerKind | null,
+  candidate: PointerCandidate | null,
+): PointerVisuals {
+  const ray = hasRay && (active === null || active === "ray");
+  const cursor = active !== null && candidate !== null;
+  return { sourceId, activePointer: active, ray, cursor, cursorPoint: cursor ? candidate!.point : null };
+}

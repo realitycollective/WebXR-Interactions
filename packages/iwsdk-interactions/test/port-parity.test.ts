@@ -17,9 +17,11 @@ import { Group, Mesh, Object3D, SphereGeometry } from "three";
 import type { Entity, World } from "@iwsdk/core";
 import {
   hitTesterContractCases,
+  nearPointerContractCases,
   transformPortContractCases,
   type HitTester,
   type HitTesterContractSubject,
+  type PhysicsFacility,
   type PoseTuple,
   type QuatTuple,
   type RayTuple,
@@ -31,11 +33,7 @@ import {
 } from "@realitycollective/webxr-interactions";
 import { BabylonHitTester, BabylonTransformPort } from "@realitycollective/babylon-interactions";
 import { ThreeHitTester, ThreeTransformPort } from "@realitycollective/threejs-interactions";
-import {
-  IWSDKTransformPort,
-  registerInteractions,
-  type IWSDKPhysicsBinding,
-} from "@realitycollective/iwsdk-interactions";
+import { IWSDKTransformPort, registerInteractions } from "@realitycollective/iwsdk-interactions";
 import {
   ThreeHitTester as XRBlocksHitTester,
   XRBlocksTransformPort,
@@ -296,6 +294,15 @@ describe.each(hitTesterPlatforms)("%s HitTester", (_name, build) => {
   }
 });
 
+// The near-pointer rule (touch press, grip grab, pointer priority, ray and
+// cursor visuals) over every platform's own hit tester: the same subjects,
+// driven by the core runtime inside the suite.
+describe.each(hitTesterPlatforms)("%s near pointers", (_name, build) => {
+  for (const contractCase of nearPointerContractCases()) {
+    it(contractCase.name, () => contractCase.run(build()));
+  }
+});
+
 // ---------------------------------------------------------------------------
 // TransformPort
 // ---------------------------------------------------------------------------
@@ -324,33 +331,53 @@ function nativeTransformPortSubject(): TransformPortContractSubject {
 }
 
 /**
- * A fake `IWSDKPhysicsBinding` for the held/released/reset contract cases -
+ * A fake `PhysicsFacility` for the held/released/reset contract cases -
  * gravity-integrated over the SAME object3D the port writes, the same idea
  * as `physics-binding.test.ts`'s fake `PhysicsSystem` but faithful to what
  * a real Havok body would do frame to frame, since these cases step it
- * repeatedly. The real binding (`register.ts`'s `physicsBindingFor`, built
- * from `PhysicsBody`/`PhysicsShape`/`PhysicsManipulation`/`PhysicsSystem`)
- * is exercised for real - against fakes of THOSE, not against Havok, which
+ * repeatedly. Only `setBodyPose`/`suspend`/`resume` are ones the port itself
+ * calls; the rest of the interface is filled in trivially. The real
+ * facility (`IWSDKPhysicsFacility`, built from
+ * `PhysicsBody`/`PhysicsShape`/`PhysicsManipulation`/`PhysicsSystem`) is
+ * exercised for real - against fakes of THOSE, not against Havok, which
  * this package's tests cannot stand up - in `physics-binding.test.ts`.
  */
-function fakeIWSDKPhysics(object: Object3D): { binding: IWSDKPhysicsBinding; step(dtSeconds: number): void } {
+function fakeIWSDKPhysics(object: Object3D): { facility: PhysicsFacility; step(dtSeconds: number): void } {
   let held = false;
   let velocity: Vec3Tuple = [0, 0, 0];
-  return {
-    binding: {
-      beginHold() {
-        held = true;
-      },
-      endHold(release) {
-        held = false;
-        velocity = [...release.linearVelocity];
-      },
-      teleport(pose) {
-        object.position.set(pose.position[0], pose.position[1], pose.position[2]);
-        object.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3]);
-        velocity = [0, 0, 0];
-      },
+  const facility: PhysicsFacility = {
+    engine: "fake",
+    getGravity: () => [0, -9.8, 0],
+    setGravity: () => undefined,
+    addBody: () => undefined,
+    removeBody: () => undefined,
+    hasBody: () => true,
+    setBodyState: () => undefined,
+    getBodyState: () => "dynamic",
+    getBodyPose: () => ({
+      position: [object.position.x, object.position.y, object.position.z],
+      quaternion: [object.quaternion.x, object.quaternion.y, object.quaternion.z, object.quaternion.w],
+    }),
+    setBodyPose(_id, pose) {
+      object.position.set(pose.position[0], pose.position[1], pose.position[2]);
+      object.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3]);
+      velocity = [0, 0, 0];
     },
+    getVelocity: () => ({ linear: [...velocity], angular: [0, 0, 0] }),
+    setVelocity: () => undefined,
+    suspend() {
+      held = true;
+    },
+    resume(_id, release) {
+      held = false;
+      velocity = [...release.linearVelocity];
+    },
+    isSuspended: () => held,
+    step: () => undefined,
+    dispose: () => undefined,
+  };
+  return {
+    facility,
     step(dtSeconds) {
       if (held) return;
       velocity = [velocity[0], velocity[1] - 9.8 * dtSeconds, velocity[2]];
@@ -363,8 +390,12 @@ function fakeIWSDKPhysics(object: Object3D): { binding: IWSDKPhysicsBinding; ste
 
 function iwsdkTransformPortSubject(): TransformPortContractSubject {
   const object = objectAtRest();
-  const { binding, step } = fakeIWSDKPhysics(object);
-  return { port: new IWSDKTransformPort(object, { physics: binding }), rest: REST_POSE, physics: { step } };
+  const { facility, step } = fakeIWSDKPhysics(object);
+  return {
+    port: new IWSDKTransformPort(object, { physics: { facility, bodyId: "obj" } }),
+    rest: REST_POSE,
+    physics: { step },
+  };
 }
 
 function babylonTransformPortSubject(): TransformPortContractSubject {
