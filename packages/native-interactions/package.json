@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/native-interactions",
-  "version": "0.1.1-preview.4",
+  "version": "0.1.2-preview.0",
   "description": "Native host adapter for the Reality Collective Interaction Extensions - reads the `input`, `interactions` and `physics` slices a native app (OpenXR, visionOS) installs on `globalThis.__rcHost`, or an injected fake, maps them into the engine-free @realitycollective/webxr-interactions core, hands the host the resolved pointer drawing, and ships the host conformance kit a native app runs on its device. No engine dependency: assets and rendering stay in the native app. Re-exports the core.",
   "keywords": [
     "realitycollective",
@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@realitycollective/webxr-input": "^0.1.8",
-    "@realitycollective/webxr-interactions": "^0.1.1-preview.4"
+    "@realitycollective/webxr-interactions": "^0.1.2-preview.0"
   },
   "repository": {
     "type": "git",
