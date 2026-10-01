@@ -49,7 +49,8 @@ describe("BabylonHitTester sphere test", () => {
     const hit = tester.hitProximity([0, 0, 0], 0.3);
     expect(hit?.interactableId).toBe("touching");
     expect(hit?.distance).toBe(0);
-    expect(hit?.point).toEqual([0, 0, 0.02]);
+    // The point is the surface nearest the probe (the touch cursor sits there), not the centre: 0.1 m from the centre toward the probe.
+    expect(hit?.point[2]).toBeCloseTo(-0.08, 9);
     expect(tester.hitProximity([0, 0, 5], 0.1)).toBeNull();
   });
 

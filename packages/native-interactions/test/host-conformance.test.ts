@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { nativeInteractionsHostConformanceCases } from "@realitycollective/native-interactions";
 import type { NativeHit } from "@realitycollective/native-interactions";
-import type { Vec3Tuple } from "@realitycollective/webxr-input";
+import { POINTER_DISPLAY_DEFAULTS, type RayTuple, type Vec3Tuple } from "@realitycollective/webxr-input";
 import { MemoryPhysicsFacility, type HoldRelease, type PhysicsBodySpec, type PhysicsShapeSpec, type PoseTuple } from "@realitycollective/webxr-interactions";
 import { FakeInputHost, ReferenceInteractionHost } from "./helpers.js";
 
@@ -55,7 +55,8 @@ class CentreDistanceHost extends ReferenceInteractionHost {
   override hitProximity(point: Vec3Tuple, radius: number): NativeHit | null {
     const hit = super.hitProximity(point, radius);
     if (!hit) return null;
-    return { ...hit, distance: Math.hypot(hit.point[0] - point[0], hit.point[1] - point[1], hit.point[2] - point[2]) };
+    const centre = this.centreOf(hit.targetId) ?? hit.point;
+    return { ...hit, distance: Math.hypot(centre[0] - point[0], centre[1] - point[1], centre[2] - point[2]) };
   }
 }
 
@@ -75,6 +76,154 @@ describe("native Interactions host conformance kit, against the reference host",
   for (const hostCase of cases) {
     it(hostCase.name, () => hostCase.run(reference()));
   }
+
+  it("fails a host that answers queries with scenery (the floor's bounds around the hand)", async () => {
+    // The Pale Signal host answered proximity with any shown mesh: the
+    // floor's bounds contain the hand, so no fingertip ever reached a target.
+    class AnyMeshHost extends ReferenceInteractionHost {
+      override hitProximity(point: Vec3Tuple, radius: number): NativeHit | null {
+        for (const [id, mesh] of this.scenery) {
+          const surface = Math.max(0, Math.hypot(mesh.position[0] - point[0], mesh.position[1] - point[1], mesh.position[2] - point[2]) - mesh.radius);
+          if (surface <= radius) return { targetId: id, distance: surface, point: [...mesh.position] };
+        }
+        return super.hitProximity(point, radius);
+      }
+    }
+    const setup = reference();
+    const anyMesh = new AnyMeshHost(setup.input);
+    const scope = cases.find((c) => c.name.includes("scenery enclosing the hand"))!;
+    await expect(scope.run({ ...setup, interactions: anyMesh, testHost: anyMesh })).rejects.toThrow(/with only scenery placed, hitProximity answered/);
+    const noScenery = { ...setup, testHost: { ...setup.testHost, placeScenery: undefined } as unknown as typeof setup.testHost };
+    await expect(scope.run(noScenery)).rejects.toThrow(/no placeScenery/);
+  });
+
+  it("fails a host whose ray or cone answers scenery, whose proximity measures the floor, or whose ray stops at scenery", async () => {
+    const scope = cases.find((c) => c.name.includes("scenery enclosing the hand"))!;
+    class Defective extends ReferenceInteractionHost {
+      constructor(input: FakeInputHost, private readonly defect: "ray" | "cone" | "distance" | "blocked" | "proximityBlocked") {
+        super(input);
+      }
+      private sceneryHit(): NativeHit | null {
+        const [id, mesh] = [...this.scenery][0] ?? [undefined, undefined];
+        return id && mesh ? { targetId: id, distance: 1, point: [...mesh.position] as Vec3Tuple } : null;
+      }
+      override hitRay(ray: RayTuple): NativeHit | null {
+        if (this.defect === "ray" && this.scenery.size > 0 && super.hitRay(ray) === null) return this.sceneryHit();
+        // Blocked: scenery in the way stops the ray, so a target behind it is never answered.
+        if (this.defect === "blocked" && this.scenery.size > 0) return null;
+        return super.hitRay(ray);
+      }
+      override hitCone(ray: RayTuple, halfAngle: number, maxLength: number): NativeHit | null {
+        if (this.defect === "cone" && this.scenery.size > 0 && super.hitCone(ray, halfAngle, maxLength) === null) return this.sceneryHit();
+        return super.hitCone(ray, halfAngle, maxLength);
+      }
+      override hitProximity(point: Vec3Tuple, radius: number): NativeHit | null {
+        if (this.defect === "proximityBlocked" && this.scenery.size > 0) return null;
+        const hit = super.hitProximity(point, radius);
+        if (this.defect === "distance" && hit) return { ...hit, distance: hit.distance + 0.01 };
+        return hit;
+      }
+    }
+    const expectations: Array<["ray" | "cone" | "distance" | "blocked" | "proximityBlocked", RegExp]> = [
+      ["proximityBlocked", /must reach the target/],
+      ["ray", /hitRay answered/],
+      ["cone", /hitCone answered/],
+      ["distance", /0\.03 within 1 mm/],
+      ["blocked", /must answer the target/],
+    ];
+    for (const [defect, pattern] of expectations) {
+      const input = new FakeInputHost({ presence: true, headPose: true, pointerVisuals: true });
+      input.enterSession();
+      const host = new Defective(input, defect);
+      await expect(scope.run({ input, interactions: host, testHost: host })).rejects.toThrow(pattern);
+    }
+  });
+
+  it("fails a host that reports a hand's analog pinch strength, or a grasp as its squeeze", async () => {
+    const strength = reference();
+    strength.input.sources = [{ id: "right-hand", kind: "hand", handedness: "right", select: 0.4, squeeze: 0 }];
+    const hand = cases.find((c) => c.name.includes("a hand's select is 0 or 1"))!;
+    await expect(hand.run(strength)).rejects.toThrow(/reports select 0\.4/);
+    const grasp = reference();
+    grasp.input.sources = [{ id: "right-hand", kind: "hand", handedness: "right", select: 1, squeeze: 0.6 }];
+    await expect(hand.run(grasp)).rejects.toThrow(/reports squeeze 0\.6/);
+    const ok = reference();
+    ok.input.sources = [{ id: "right-hand", kind: "hand", handedness: "right", select: 1, squeeze: 0 }];
+    await expect(hand.run(ok)).resolves.toBeUndefined();
+  });
+
+  it("fails a host that applies a pointer display of its own instead of the binding's drawing", async () => {
+    const setup = reference();
+    setup.input.sources = [
+      { id: "right-controller", kind: "controller", handedness: "right", select: 0, squeeze: 0, ray: { origin: [0, 1, 0], direction: [0, 0, -1] }, gripPose: { position: [0, 1, 0], quaternion: [0, 0, 0, 1] } },
+    ];
+    setup.interactions.placeTarget("far", [0, 1, -2], 0.1);
+    const display = cases.find((c) => c.name.includes("the pointer display is the app's"))!;
+    await expect(display.run(setup)).resolves.toBeUndefined();
+    // A host with "always" of its own: draws the ray whatever it was told.
+    const always = new FakeInputHost({ presence: true, pointerVisuals: true });
+    always.sources = setup.input.sources;
+    always.enterSession();
+    const original = always.applyPointerVisuals!;
+    always.applyPointerVisuals = (sourceId, visuals) => original(sourceId, { ...visuals, ray: true });
+    const stubborn = new ReferenceInteractionHost(always);
+    stubborn.placeTarget("far", [0, 1, -2], 0.1);
+    await expect(display.run({ input: always, interactions: stubborn, testHost: stubborn })).rejects.toThrow(/still draws a ray|the host draws/);
+    const noReadback = { ...setup, testHost: { ...setup.testHost, pointerVisuals: undefined } as unknown as typeof setup.testHost };
+    await expect(display.run(noReadback)).rejects.toThrow(/no applyPointerVisuals or no pointerVisuals readback/);
+  });
+
+  it("fails a host that draws no cursor on a panel, and one whose discs leave panels out", async () => {
+    const visualsCase = cases.find((c) => c.name.includes("exactly as told"))!;
+    // A host that keeps a panel cursor off (the old stopgap gone, nothing drawn in its place).
+    const noPanel = new FakeInputHost({ presence: true, pointerVisuals: true });
+    noPanel.enterSession();
+    const original = noPanel.applyPointerVisuals!;
+    noPanel.applyPointerVisuals = (sourceId, visuals) => original(sourceId, visuals.targetKind === "panel" ? { ...visuals, cursor: false, cursorPoint: null } : visuals);
+    const noPanelHost = new ReferenceInteractionHost(noPanel);
+    await expect(visualsCase.run({ input: noPanel, interactions: noPanelHost, testHost: noPanelHost })).rejects.toThrow(/told a cursor on a panel/);
+    // A host that records the panel cursor but draws no disc for it.
+    const setup = reference();
+    class NoPanelDisc extends ReferenceInteractionHost {
+      override cursors(): Vec3Tuple[] {
+        return super.cursors().filter((point) => point[0] !== 0.2);
+      }
+    }
+    const noDisc = new NoPanelDisc(setup.input);
+    await expect(visualsCase.run({ ...setup, interactions: noDisc, testHost: noDisc })).rejects.toThrow(/no cursor disc on the panel/);
+  });
+
+  it("fails a host with a ray display of its own (drawn whenever the ray owns the source), a stale display readback, and one that drops a source", async () => {
+    const visualsCase = cases.find((c) => c.name.includes("exactly as told"))!;
+    const ownMode = new FakeInputHost({ presence: true, pointerVisuals: true });
+    ownMode.enterSession();
+    const original = ownMode.applyPointerVisuals!;
+    ownMode.applyPointerVisuals = (sourceId, visuals) => original(sourceId, visuals.activePointer === "ray" ? { ...visuals, ray: true } : visuals);
+    const ownModeHost = new ReferenceInteractionHost(ownMode);
+    await expect(visualsCase.run({ input: ownMode, interactions: ownModeHost, testHost: ownModeHost })).rejects.toThrow(/display says never/);
+
+    const display = cases.find((c) => c.name.includes("the pointer display is the app's"))!;
+    const stale = reference();
+    stale.input.sources = [{ id: "right-controller", kind: "controller", handedness: "right", select: 0, squeeze: 0, ray: { origin: [0, 1, 0], direction: [0, 0, -1] }, gripPose: { position: [0, 1, 0], quaternion: [0, 0, 0, 1] } }];
+    stale.input.applyPointerDisplay = () => undefined;
+    stale.input.displayReceived = { ...POINTER_DISPLAY_DEFAULTS, ray: "always" };
+    await expect(display.run(stale)).rejects.toThrow(/received pointer display/);
+    stale.input.displayReceived = undefined;
+    await expect(display.run(stale)).rejects.toThrow(/received pointer display undefined/);
+    // A host with no display readback is judged on its drawings alone.
+    (stale.interactions as { pointerDisplay?: unknown }).pointerDisplay = undefined;
+    await expect(display.run(stale)).resolves.toBeUndefined();
+
+    const dropping = new FakeInputHost({ presence: true, pointerVisuals: true });
+    dropping.sources = stale.input.sources;
+    dropping.enterSession();
+    const keep = dropping.applyPointerVisuals!;
+    dropping.applyPointerVisuals = (sourceId, visuals) => {
+      if (sourceId !== "right-controller") keep(sourceId, visuals);
+    };
+    const droppingHost = new ReferenceInteractionHost(dropping);
+    await expect(display.run({ input: dropping, interactions: droppingHost, testHost: droppingHost })).rejects.toThrow(/the host draws undefined/);
+  });
 
   it("fails a host that measures proximity to the centre", async () => {
     const setup = reference();

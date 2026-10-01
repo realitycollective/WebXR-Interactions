@@ -1,0 +1,338 @@
+{
+  "version": "iwsdk.scene.v1",
+  "units": "meters",
+  "metadata": {
+    "com.realitycollective.interactions-harness": "The Interactions playground stations, generated from demos/playground/src/scene.ts by harness/native/scripts/write-scene.mjs. Interactable parts are the nodes named pg-*; the harness registers them by id."
+  },
+  "resources": {},
+  "nodes": [
+    {
+      "id": "button-pedestal",
+      "name": "button-pedestal",
+      "transform": {
+        "position": [
+          0.275,
+          0.95,
+          -0.47631
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "button-pedestal"
+      }
+    },
+    {
+      "id": "pg-button",
+      "name": "pg-button",
+      "transform": {
+        "position": [
+          0.275,
+          1,
+          -0.47631
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "pg-button"
+      }
+    },
+    {
+      "id": "pg-gaze-button",
+      "name": "pg-gaze-button",
+      "transform": {
+        "position": [
+          -0.12526,
+          1.5,
+          -0.89124
+        ],
+        "rotationDeg": [
+          0,
+          8,
+          0
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "pg-gaze-button"
+      },
+      "children": [
+        {
+          "id": "gaze-ring",
+          "name": "gaze-ring",
+          "transform": {
+            "position": [
+              0,
+              0,
+              0.03
+            ],
+            "scale": [
+              0.001,
+              0.001,
+              0.001
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "gaze-ring"
+          }
+        }
+      ]
+    },
+    {
+      "id": "table-mount",
+      "name": "table-mount",
+      "transform": {
+        "position": [
+          -0.275,
+          1,
+          -0.47631
+        ],
+        "rotationDeg": [
+          0,
+          30,
+          0
+        ]
+      },
+      "children": [
+        {
+          "id": "table-plate",
+          "name": "table-plate",
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "table-plate"
+          }
+        },
+        {
+          "id": "pg-lever-table",
+          "name": "pg-lever-table",
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "pg-lever-table"
+          }
+        }
+      ]
+    },
+    {
+      "id": "wall-v-mount",
+      "name": "wall-v-mount",
+      "transform": {
+        "position": [
+          -0.49847,
+          1.2,
+          -0.23244
+        ],
+        "rotationDeg": [
+          0,
+          65,
+          0
+        ]
+      },
+      "children": [
+        {
+          "id": "wall-v-plate",
+          "name": "wall-v-plate",
+          "transform": {
+            "position": [
+              0,
+              0,
+              -0.05
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "wall-v-plate"
+          }
+        },
+        {
+          "id": "pg-lever-wall-v",
+          "name": "pg-lever-wall-v",
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "pg-lever-wall-v"
+          }
+        }
+      ]
+    },
+    {
+      "id": "wall-h-mount",
+      "name": "wall-h-mount",
+      "transform": {
+        "position": [
+          -0.54164,
+          1.2,
+          0.09551
+        ],
+        "rotationDeg": [
+          0,
+          100,
+          0
+        ]
+      },
+      "children": [
+        {
+          "id": "wall-h-plate",
+          "name": "wall-h-plate",
+          "transform": {
+            "position": [
+              0,
+              0,
+              -0.05
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "wall-h-plate"
+          }
+        },
+        {
+          "id": "pg-lever-wall-h",
+          "name": "pg-lever-wall-h",
+          "transform": {
+            "position": [
+              0,
+              0,
+              0
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "pg-lever-wall-h"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dial-panel",
+      "name": "dial-panel",
+      "transform": {
+        "position": [
+          0.49847,
+          0.97,
+          -0.23244
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "dial-panel"
+      }
+    },
+    {
+      "id": "pg-dial",
+      "name": "pg-dial",
+      "transform": {
+        "position": [
+          0.49847,
+          1.01,
+          -0.23244
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "pg-dial"
+      },
+      "children": [
+        {
+          "id": "dial-marker",
+          "name": "dial-marker",
+          "transform": {
+            "position": [
+              0,
+              0.03,
+              -0.035
+            ]
+          },
+          "content": {
+            "type": "asset",
+            "asset": "dial-marker"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pg-pulley",
+      "name": "pg-pulley",
+      "transform": {
+        "position": [
+          0.54164,
+          1.3,
+          0.09551
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "pg-pulley"
+      }
+    },
+    {
+      "id": "toss-tee",
+      "name": "toss-tee",
+      "transform": {
+        "position": [
+          0,
+          0.52,
+          -0.5
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "toss-tee"
+      }
+    },
+    {
+      "id": "pg-ball",
+      "name": "pg-ball",
+      "transform": {
+        "position": [
+          0,
+          1.1,
+          -0.5
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "pg-ball"
+      }
+    },
+    {
+      "id": "pg-hoop",
+      "name": "pg-hoop",
+      "transform": {
+        "position": [
+          0,
+          1.5,
+          -1.2
+        ],
+        "rotationDeg": [
+          -90,
+          0,
+          0
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "pg-hoop"
+      }
+    }
+  ]
+}

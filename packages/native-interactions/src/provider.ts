@@ -23,6 +23,10 @@
  *   selects, and the pinching hand's ray pose travels as `selectorPose`. A
  *   host reports only `eyeTracking` and `getEyeGazePose()`.
  * - A pulse's intensity is clamped to 0..1 before it reaches the host.
+ * - A hand's `squeeze` is 0 whatever the host reports (`NativeInputHost.sample`):
+ *   a hand has no squeeze on the web, its grab is its pinch through
+ *   `select`, and a grasp value left in `squeeze` held grabs open on a
+ *   relaxed hand (Pale Signal handover, G1).
  *
  * Every snapshot, and every tuple inside it, is copied before it leaves this
  * class, so a host that reuses its own sample buffers still meets the
@@ -170,7 +174,11 @@ export class NativeInputProvider implements InputProvider {
       this.eyeGaze.reset();
       return [];
     }
-    const sources = this.host.sample().map(copySnapshot);
+    const sources = this.host.sample().map((source) => {
+      const copy = copySnapshot(source);
+      if (copy.kind === "hand") copy.squeeze = 0;
+      return copy;
+    });
     if (!this.capabilities.eyeGaze) return sources;
     return this.eyeGaze.update(this.eyeGazeFrame(sources), sources, this.frameSeconds);
   }

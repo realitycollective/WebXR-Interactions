@@ -26,9 +26,11 @@ import {
   type World,
 } from "@iwsdk/core";
 import { createSystem } from "./create-system.js";
+import { hasRegistered } from "./has-registered.js";
 import { Quaternion, Vector3 } from "three";
 import type { InputHitHint, RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
+  surfacePointOnSphere,
   InteractionRuntime,
   coneHitForSpheres,
   type DwellConfig,
@@ -39,10 +41,14 @@ import {
   type PhysicsBodySpec,
   type PhysicsFacility,
   type PhysicsShapeSpec,
+  type PointerArbiter,
+  type PointerDisplay,
+  type PointerDisplayConfig,
   type SphereTarget,
 } from "@realitycollective/webxr-interactions";
 import { IWSDKInputProvider, type IWSDKProviderOptions } from "./provider.js";
 import { IWSDKPhysicsFacility } from "./physics-facility.js";
+import { IWSDKPointerVisuals, type PointerVisualsWorld } from "./pointer-visuals.js";
 import { IWSDKTransformPort } from "./transform-port.js";
 
 const TEMP_V = new Vector3();
@@ -120,7 +126,8 @@ class EntityHitTester implements HitTester {
         best = {
           interactableId: entry.id,
           distance: Math.max(0, distance),
-          point: [entry.x, entry.y, entry.z],
+          // The surface point nearest the fingertip, where the touch cursor sits.
+          point: surfacePointOnSphere([entry.x, entry.y, entry.z], entry.radius, point),
         };
       }
     }
@@ -168,6 +175,24 @@ export interface IWSDKRegisterOptions extends IWSDKProviderOptions {
    * own, the same option every other platform's setup takes.
    */
   physics?: PhysicsFacility;
+  /**
+   * The arbiter deciding which pointer (ray, near touch, gaze) owns each
+   * source. Share one with the UI Extensions host so both make one decision.
+   * Default: the runtime's own.
+   */
+  pointers?: PointerArbiter;
+  /**
+   * What the app shows for a pointer: when the ray is drawn, its length, and
+   * whether the cursor shows on objects and panels. A `PointerDisplay` or a
+   * partial config over IWSDK 1.0.0's defaults. Applied to IWSDK's own visuals
+   * unless `pointerVisuals` is false.
+   */
+  pointerDisplay?: PointerDisplay | Partial<PointerDisplayConfig>;
+  /**
+   * Apply the pointer display settings to IWSDK's ray and cursor (default
+   * true). False leaves IWSDK's visuals entirely alone.
+   */
+  pointerVisuals?: boolean;
 }
 
 export interface IWSDKRegisterEntityOptions {
@@ -191,6 +216,8 @@ export class IWSDKInteractions {
   readonly provider: IWSDKInputProvider;
   /** The platform's physics: an `IWSDKPhysicsFacility` by default, or the app's own from `options.physics`. */
   readonly physics: PhysicsFacility;
+  /** Applies the pointer display settings to IWSDK's ray and cursor; null when `pointerVisuals` is false. */
+  readonly pointerVisuals: IWSDKPointerVisuals | null;
   private readonly hitTester = new EntityHitTester();
   private readonly world: World;
   private readonly entities = new Map<string, Entity>();
@@ -206,7 +233,13 @@ export class IWSDKInteractions {
       hitTester: this.hitTester,
       ...(options.dwellDefaults ? { dwellDefaults: options.dwellDefaults } : {}),
       ...(options.eyeGaze ? { eyeGaze: options.eyeGaze } : {}),
+      ...(options.pointers ? { pointers: options.pointers } : {}),
+      ...(options.pointerDisplay ? { pointerDisplay: options.pointerDisplay } : {}),
     });
+    this.pointerVisuals =
+      (options.pointerVisuals ?? true)
+        ? new IWSDKPointerVisuals({ world: world as unknown as PointerVisualsWorld, runtime: this.runtime })
+        : null;
     this.physics = options.physics ?? new IWSDKPhysicsFacility(world, { entityFor: (id) => this.entities.get(id) });
   }
 
@@ -226,7 +259,7 @@ export class IWSDKInteractions {
     // The common IWSDK case: the app added PhysicsBody/PhysicsShape itself,
     // with no `body`/`shape` option here - the port still gets the held-pose
     // rule through the facility, exactly as when this registers the body.
-    const hasOwnPhysicsBody = entity.hasComponent(PhysicsBody) && entity.hasComponent(PhysicsShape);
+    const hasOwnPhysicsBody = hasRegistered(entity, PhysicsBody) && hasRegistered(entity, PhysicsShape);
     let addsBody = false;
     if (options.body || options.shape) {
       if (!object) {
@@ -336,6 +369,7 @@ export class IWSDKInteractions {
   }
 
   dispose(): void {
+    this.pointerVisuals?.dispose();
     this.runtime.dispose();
     this.provider.dispose();
     this.physics.dispose();

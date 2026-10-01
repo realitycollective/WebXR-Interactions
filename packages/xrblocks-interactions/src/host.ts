@@ -31,10 +31,14 @@ import {
   type PhysicsBodySpec,
   type PhysicsFacility,
   type PhysicsShapeSpec,
+  type PointerArbiter,
+  type PointerDisplay,
+  type PointerDisplayConfig,
 } from "@realitycollective/webxr-interactions";
 import {
   RapierPhysicsFacility,
   ThreeHitTester,
+  ThreePointerVisuals,
   type DwellConfig,
   type InteractableDescriptor,
   type AnyRapierModule,
@@ -50,6 +54,18 @@ export interface XRBlocksInteractionsOptions extends XRBlocksContext, XRBlocksPr
   dwellDefaults?: DwellConfig;
   /** The near-pointer distances (touch hover, touch press, grab radius). Defaults are IWSDK 1.0.0's. */
   nearPointer?: Partial<NearPointerOptions>;
+  /** The pointer arbiter shared with the UI Extensions host (`connectUIExtensions({ pointers })`): one decision per source over panels and interactables. */
+  pointers?: PointerArbiter;
+  /** The app's pointer display settings (ray never, always or while hitting; cursors; the look). Defaults are IWSDK 1.0.0's. */
+  pointerDisplay?: PointerDisplay | Partial<PointerDisplayConfig>;
+  /**
+   * Draw the ray stub and the cursor disc for every source, IWSDK's look,
+   * into this scene (the Script, or any world-space root), exactly as the
+   * core decides them. XR Blocks' own controller reticle is the engine's and
+   * cannot be hidden from here (UIX-G11); with this on, the app should turn
+   * that reticle off in XR Blocks' options so one cursor is drawn.
+   */
+  pointerVisuals?: { scene: Object3D };
   /**
    * The platform's physics. The default engine for XR Blocks is the Rapier
    * it bundles: pass `{ rapier }`, the initialised module (XR Blocks
@@ -99,6 +115,8 @@ export class XRBlocksInteractions {
   private readonly rigidBodyTypes: RapierRigidBodyTypes | undefined;
   private readonly ports = new Map<string, XRBlocksTransformPort>();
   private readonly objects = new Map<string, Object3D>();
+  /** The ray and cursor renderer, when the setup asked for one. */
+  readonly pointerVisuals: ThreePointerVisuals | null;
 
   constructor(options: XRBlocksInteractionsOptions) {
     this.provider = new XRBlocksInputProvider(
@@ -112,7 +130,12 @@ export class XRBlocksInteractions {
       hitTester: this.hitTester,
       ...(options.dwellDefaults ? { dwellDefaults: options.dwellDefaults } : {}),
       ...(options.nearPointer ? { nearPointer: options.nearPointer } : {}),
+      ...(options.pointers ? { pointers: options.pointers } : {}),
+      ...(options.pointerDisplay ? { pointerDisplay: options.pointerDisplay } : {}),
     });
+    this.pointerVisuals = options.pointerVisuals
+      ? new ThreePointerVisuals({ scene: options.pointerVisuals.scene, runtime: this.runtime })
+      : null;
     this.physics = options.physics
       ? "rapier" in options.physics
         ? new RapierPhysicsFacility(options.physics.rapier, { objectFor: (id) => this.objects.get(id) })
@@ -194,6 +217,7 @@ export class XRBlocksInteractions {
   }
 
   dispose(): void {
+    this.pointerVisuals?.dispose();
     this.runtime.dispose();
     this.physics?.dispose();
   }

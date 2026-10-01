@@ -17,6 +17,9 @@ It re-exports everything from [`@realitycollective/webxr-interactions`](https://
 | **Movement** | Moves and rotates three.js objects for grab, hinge, dial and slide |
 | **Desktop** | A mouse fallback, so the same scene is testable without a headset |
 | **Presence** | Show and hide the user's own hand and controller models, once you have registered them |
+| **Pointer visuals** | `ThreePointerVisuals` draws the app's `pointerDisplay` (IWSDK's ray stub and cursor disc by default) for every source: `createThreeInteractions({ pointerVisuals: { scene }, pointers, pointerDisplay })` |
+| **Physics** | `RapierPhysicsFacility`: pass `physics: { rapier }` with the Rapier module your app loads, and grab, throw and rest run over Rapier bodies with IWSDK's defaults; `ThreeTransformPort` gains the held pose |
+| **Eye gaze** | `WebXRInputProvider` reports `capabilities.eyeGaze` for a session with a gaze input source and applies the shared gaze-and-pinch rule |
 
 ## Presence
 
@@ -84,7 +87,7 @@ Poke targeting (`hitProximity`) is a sphere test on each registered object's wor
 
 ## Live demo
 
-The interaction playground - the full station set, mouse-capable on desktop, VR button for headsets: **[webxr-interactions.pages.dev](https://webxr-interactions.pages.dev)**
+The interaction playground - the full station set on every platform, mouse-capable on desktop, VR button for headsets; add `?engine=threejs` for this adapter: **[webxr-interactions.pages.dev](https://webxr-interactions.pages.dev)**
 
 ## Documentation
 

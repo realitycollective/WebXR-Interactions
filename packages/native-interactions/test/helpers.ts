@@ -23,13 +23,14 @@ import type {
   Unsubscribe,
   Vec3Tuple,
 } from "@realitycollective/webxr-input";
-import { coneHitForSpheres, type HoldRelease, type PointerVisuals, type SphereTarget } from "@realitycollective/webxr-interactions";
+import { coneHitForSpheres, surfacePointOnSphere, type HoldRelease, type PointerDisplayConfig, type SphereTarget } from "@realitycollective/webxr-interactions";
 import type {
   NativeHit,
   NativeInputFacts,
   NativeInputHost,
   NativeInteractionHost,
   NativeInteractionsTestHost,
+  NativePointerVisuals,
   NativePresenceShown,
 } from "@realitycollective/native-interactions";
 
@@ -77,22 +78,28 @@ export class FakeInputHost implements NativeInputHost {
   /** Cursor discs drawn, which a correct host keeps whatever presence says. */
   cursorPoints: Vec3Tuple[] = [];
   /** What each source draws now, as last told through `applyPointerVisuals`. */
-  readonly visualsBySource = new Map<string, PointerVisuals>();
+  readonly visualsBySource = new Map<string, NativePointerVisuals>();
   /** Every `applyPointerVisuals` call, in order. */
-  readonly visualsCalls: Array<[string, PointerVisuals]> = [];
+  readonly visualsCalls: Array<[string, NativePointerVisuals]> = [];
+  /** The pointer display settings last received, when the fake can take them. */
+  displayReceived: PointerDisplayConfig | undefined;
 
   getHeadPose?: () => HeadPose;
   getEyeGazePose?: () => PoseTuple | null;
   sampleHints?: () => readonly InputHitHint[];
   pulse?: (sourceId: string, intensity: number, durationMs: number) => boolean;
   applyPresence?: (side: "left" | "right", shown: NativePresenceShown) => void;
-  applyPointerVisuals?: (sourceId: string, visuals: PointerVisuals) => void;
+  applyPointerVisuals?: (sourceId: string, visuals: NativePointerVisuals) => void;
+  applyPointerDisplay?: (config: PointerDisplayConfig) => void;
 
   constructor(capable: FakeInputHostCapable = {}) {
     if (capable.pointerVisuals) {
       this.applyPointerVisuals = (sourceId, visuals) => {
         this.visualsCalls.push([sourceId, visuals]);
         this.visualsBySource.set(sourceId, visuals);
+      };
+      this.applyPointerDisplay = (config) => {
+        this.displayReceived = config;
       };
     }
     if (capable.headPose) this.getHeadPose = () => this.headPoseValue;
@@ -327,6 +334,8 @@ export class FakeInteractionHost implements NativeInteractionHost {
 export class ReferenceInteractionHost extends FakeInteractionHost implements NativeInteractionsTestHost {
   private readonly targets = new Map<string, { position: Vec3Tuple; radius: number }>();
   private readonly hiddenTargets = new Set<string>();
+  /** Scenery the kit placed: shown meshes that are not interactables. A correct host never answers with them. */
+  protected readonly scenery = new Map<string, { position: Vec3Tuple; radius: number }>();
   private readonly releases = new Map<string, HoldRelease>();
   private readonly input: FakeInputHost | undefined;
 
@@ -339,9 +348,24 @@ export class ReferenceInteractionHost extends FakeInteractionHost implements Nat
     this.targets.set(targetId, { position: [...position], radius });
   }
 
+  /** A placed target's centre, for a defective subclass that measures to it. */
+  protected centreOf(targetId: string): Vec3Tuple | undefined {
+    const target = this.targets.get(targetId);
+    return target ? [...target.position] : undefined;
+  }
+
+  placeScenery(id: string, position: Vec3Tuple, radius: number): void {
+    this.scenery.set(id, { position: [...position], radius });
+  }
+
   clearTargets(): void {
     this.targets.clear();
     this.hiddenTargets.clear();
+    this.scenery.clear();
+  }
+
+  pointerDisplay(): PointerDisplayConfig | undefined {
+    return this.input?.displayReceived;
   }
 
   setTargetVisible(targetId: string, visible: boolean): void {
@@ -395,7 +419,7 @@ export class ReferenceInteractionHost extends FakeInteractionHost implements Nat
     return [...(this.input?.cursorPoints ?? []).map((point) => [...point] as Vec3Tuple), ...told];
   }
 
-  pointerVisuals(sourceId: string): PointerVisuals | undefined {
+  pointerVisuals(sourceId: string): NativePointerVisuals | undefined {
     return this.input?.visualsBySource.get(sourceId);
   }
 
@@ -428,7 +452,7 @@ export class ReferenceInteractionHost extends FakeInteractionHost implements Nat
         Math.hypot(target.position[0] - point[0], target.position[1] - point[1], target.position[2] - point[2]) -
         target.radius;
       if (surface <= radius && (best === null || surface < best.distance)) {
-        best = { targetId: id, distance: Math.max(0, surface), point: [...target.position] };
+        best = { targetId: id, distance: Math.max(0, surface), point: surfacePointOnSphere(target.position, target.radius, point) };
       }
     }
     return best;

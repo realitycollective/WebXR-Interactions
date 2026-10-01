@@ -16,6 +16,7 @@ import { describe, it } from "vitest";
 import { Group, Mesh, Object3D, SphereGeometry } from "three";
 import type { Entity, World } from "@iwsdk/core";
 import {
+  surfacePointOnSphere,
   hitTesterContractCases,
   nearPointerContractCases,
   transformPortContractCases,
@@ -123,7 +124,7 @@ class GeometricInteractionHost extends FakeInteractionHost {
     for (const [id, target] of this.targets) {
       const distance = Math.max(0, dist(point, target.position) - target.radius);
       if (distance > radius) continue;
-      if (best === null || distance < best.distance) best = { targetId: id, distance, point: target.position };
+      if (best === null || distance < best.distance) best = { targetId: id, distance, point: surfacePointOnSphere(target.position, target.radius, point) };
     }
     return best;
   }

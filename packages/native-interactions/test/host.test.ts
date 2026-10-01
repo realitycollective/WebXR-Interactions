@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PointerArbiter } from "@realitycollective/webxr-input";
 import { NativeInteractions, createNativeInteractions } from "@realitycollective/native-interactions";
 import { FakeInputHost, FakeInteractionHost } from "./helpers.js";
 
@@ -100,14 +101,43 @@ describe("createNativeInteractions", () => {
     native.register({ id: "button", behaviours: [{ kind: "press" }] });
 
     native.update(1 / 60);
-    // The fingertip 5 cm from the surface: touch owns the hand, the ray is hidden, the cursor sits on the surface.
-    expect(input.visualsBySource.get("right-hand")).toEqual({ sourceId: "right-hand", activePointer: "touch", ray: false, cursor: true, cursorPoint: [0, 1, -0.9] });
+    // The fingertip 5 cm from the surface: touch owns the hand, the ray is hidden, the cursor sits on the surface,
+    // and the drawing is resolved under IWSDK's default display (a 0.008 m disc, 0.004 m off the surface).
+    expect(input.visualsBySource.get("right-hand")).toMatchObject({
+      sourceId: "right-hand",
+      activePointer: "touch",
+      ray: false,
+      cursor: true,
+      cursorPoint: [0, 1, -0.9],
+      targetKind: "object",
+      targetId: "button",
+      hitDistance: 0.05,
+      cursorRadius: 0.008,
+      cursorOffset: 0.004,
+      cursorOpacity: 0.7,
+      rayRadius: 0.001,
+    });
+    expect(input.displayReceived?.ray).toBe("whileHitting");
     expect(native.runtime.getNearPointerOptions().touchDown).toBe(0.03);
+    // A run-time change of the app's display reaches the host at once and on the next frame's drawing.
+    native.runtime.getPointerDisplay().set({ cursorOnObjects: false });
+    expect(input.displayReceived?.cursorOnObjects).toBe(false);
+    native.update(1 / 60);
+    expect(input.visualsBySource.get("right-hand")?.cursor).toBe(false);
 
     native.dispose();
     const calls = input.visualsCalls.length;
     native.runtime.update(1 / 60);
     expect(input.visualsCalls.length).toBe(calls);
+  });
+
+  it("shares the app's pointer arbiter with the runtime when given one", () => {
+    const pointers = new PointerArbiter();
+    const native = createNativeInteractions({ input: new FakeInputHost(), interactions: new FakeInteractionHost(), pointers });
+    expect(native.runtime.getPointerArbiter()).toBe(pointers);
+    expect(pointers.getSets().map((set) => set.id)).toEqual(["interactions"]);
+    native.dispose();
+    expect(pointers.getSets()).toEqual([]);
   });
 
   it("draws nothing through a host that cannot be told what to draw", () => {

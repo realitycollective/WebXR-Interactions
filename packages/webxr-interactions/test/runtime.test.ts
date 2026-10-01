@@ -336,18 +336,31 @@ describe("grab suspends and resumes physics via beginHold/endHold", () => {
     hitTester.rayTarget = "prop";
   });
 
-  it("calls beginHold on grab start and endHold with the tracked release velocity on a normal release", () => {
-    provider.sources = [raySource("right", { squeeze: 1 })];
+  it("calls beginHold on grab start and endHold with the OBJECT's velocity over the last physics step on a normal release", () => {
+    // The core throw rule (`release-velocity.ts`): IWSDK hands Havok the
+    // held object's pose every frame and the body keeps the velocity of its
+    // last 1/60 s step, so the throw is the object's velocity, not the
+    // source's reported one.
+    const grip = (z: number) => ({ position: [0, 1, z] as [number, number, number], quaternion: [0, 0, 0, 1] as [number, number, number, number] });
+    provider.sources = [raySource("right", { squeeze: 1, gripPose: grip(-0.4) })];
     runtime.update(1 / 60);
     expect(transform.holdStarts).toBe(1);
     expect(transform.held).toBe(true);
 
+    // The grip moves 6 cm forward in one 1/60 s frame: 3.6 m/s along -Z.
+    provider.sources = [raySource("right", { squeeze: 1, gripPose: grip(-0.46) })];
+    runtime.update(1 / 60);
     provider.sources = [
-      raySource("right", { squeeze: 0, linearVelocity: [1, 2, 3], angularVelocity: [0, 1, 0] }),
+      raySource("right", { squeeze: 0, gripPose: grip(-0.46), linearVelocity: [1, 2, 3], angularVelocity: [0, 1, 0] }),
     ];
     runtime.update(1 / 60);
     expect(transform.held).toBe(false);
-    expect(transform.releases).toEqual([{ linearVelocity: [1, 2, 3], angularVelocity: [0, 1, 0] }]);
+    expect(transform.releases).toHaveLength(1);
+    const release = transform.releases[0]!;
+    expect(release.linearVelocity[0]).toBeCloseTo(0, 6);
+    expect(release.linearVelocity[1]).toBeCloseTo(0, 6);
+    expect(release.linearVelocity[2]).toBeCloseTo(-3.6, 6);
+    expect(release.angularVelocity).toEqual([0, 0, 0]);
   });
 
   it("a source that vanishes mid-hold still ends the hold, with zero velocity", () => {

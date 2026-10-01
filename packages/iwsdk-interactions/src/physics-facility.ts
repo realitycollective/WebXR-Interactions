@@ -14,6 +14,7 @@
  * family's own engine-free reference, `MemoryPhysicsFacility` - see that
  * test file's own header.
  */
+import { hasRegistered } from "./has-registered.js";
 import {
   Matrix4,
   Quaternion,
@@ -154,7 +155,7 @@ export class IWSDKPhysicsFacility implements PhysicsFacility {
   hasBody(id: string): boolean {
     if (this.suspended.has(id)) return true;
     const entity = this.entityFor(id);
-    return entity ? entity.hasComponent(PhysicsBody) : false;
+    return entity ? hasRegistered(entity, PhysicsBody) : false;
   }
 
   setBodyState(id: string, state: PhysicsBodyState): void {
@@ -253,14 +254,14 @@ export class IWSDKPhysicsFacility implements PhysicsFacility {
   private requireEntityWithBody(id: string): Entity {
     const entity = this.entityFor(id);
     if (!entity) throw missingBody(id);
-    if (!this.suspended.has(id) && !entity.hasComponent(PhysicsBody)) throw missingBody(id);
+    if (!this.suspended.has(id) && !hasRegistered(entity, PhysicsBody)) throw missingBody(id);
     return entity;
   }
 
   /** Same as {@link requireEntityWithBody}, for a call that needs the entity to carry a LIVE `PhysicsBody` (not merely suspended). */
   private requireBodyEntity(id: string): Entity {
     const entity = this.entityFor(id);
-    if (!entity || !entity.hasComponent(PhysicsBody)) throw missingBody(id);
+    if (!entity || !hasRegistered(entity, PhysicsBody)) throw missingBody(id);
     return entity;
   }
 

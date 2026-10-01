@@ -191,6 +191,23 @@ export function worldToLocal(
 }
 
 /** Closest-approach distance from a ray to a point, and the along-ray t. */
+/**
+ * The point on a sphere's surface nearest `query`: the centre moved `radius`
+ * toward the query. A query at the centre exactly takes the point straight
+ * above it. This is the `point` a proximity hit reports, where the touch
+ * cursor sits (IWSDK's sphere intersector reports the point on the mesh,
+ * never the centre).
+ */
+export function surfacePointOnSphere(centre: Vec3Tuple, radius: number, query: Vec3Tuple): Vec3Tuple {
+  const dx = query[0] - centre[0];
+  const dy = query[1] - centre[1];
+  const dz = query[2] - centre[2];
+  const length = Math.hypot(dx, dy, dz);
+  if (length < 1e-9) return [centre[0], centre[1] + radius, centre[2]];
+  const k = radius / length;
+  return [centre[0] + dx * k, centre[1] + dy * k, centre[2] + dz * k];
+}
+
 export function rayPointDistance(ray: RayTuple, point: Vec3Tuple): { distance: number; t: number } {
   const toPoint = vSub(point, ray.origin);
   const t = vDot(toPoint, ray.direction);

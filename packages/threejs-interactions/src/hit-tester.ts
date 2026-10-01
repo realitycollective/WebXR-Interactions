@@ -31,6 +31,7 @@ import { Raycaster, type BufferGeometry, type Intersection, type Mesh, type Obje
 import type { RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
   coneHitForSpheres,
+  surfacePointOnSphere,
   type HitTester,
   type InteractableHit,
   type SphereTarget,
@@ -153,7 +154,14 @@ export class ThreeHitTester implements HitTester {
         Math.hypot(e[12] - point[0], e[13] - point[1], e[14] - point[2]) - radius0 * scale,
       );
       if (surfaceDistance <= radius && (best === null || surfaceDistance < best.distance)) {
-        best = { interactableId: id, distance: surfaceDistance, point: [e[12], e[13], e[14]] };
+        // The point is where the touch cursor sits: the surface nearest the
+        // fingertip, never the centre (IWSDK's sphere intersector reports the
+        // point on the mesh).
+        best = {
+          interactableId: id,
+          distance: surfaceDistance,
+          point: surfacePointOnSphere([e[12], e[13], e[14]], radius0 * scale, point),
+        };
       }
     }
     return best;

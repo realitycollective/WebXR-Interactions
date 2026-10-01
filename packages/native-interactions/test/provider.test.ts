@@ -3,6 +3,22 @@ import { inputProviderContractCases } from "@realitycollective/webxr-input";
 import { NativeInputProvider } from "@realitycollective/native-interactions";
 import { FakeInputHost } from "./helpers.js";
 
+describe("a hand's squeeze", () => {
+  it("is 0 whatever the host reports, so a grasp value never holds a grab open", () => {
+    const host = new FakeInputHost();
+    host.sources = [
+      { id: "right-hand", kind: "hand", handedness: "right", select: 1, squeeze: 0.8 },
+      { id: "left-controller", kind: "controller", handedness: "left", select: 0.2, squeeze: 0.9 },
+    ];
+    host.enterSession();
+    const provider = new NativeInputProvider({ input: host });
+    const [hand, controller] = provider.sample();
+    expect(hand).toMatchObject({ kind: "hand", select: 1, squeeze: 0 });
+    expect(controller).toMatchObject({ kind: "controller", select: 0.2, squeeze: 0.9 });
+    provider.dispose();
+  });
+});
+
 describe("NativeInputProvider contract", () => {
   const host = new FakeInputHost();
   const provider = new NativeInputProvider({ input: host });

@@ -1,12 +1,18 @@
 # @realitycollective/native-interactions
 
-The native host adapter for the Reality Collective Interaction Extensions. A native app (OpenXR on Quest, CompositorServices on visionOS, or any other shell embedding a JavaScript engine such as Hermes) installs `globalThis.__rcHost`, and this package reads its `input` and `interactions` slices into the [`@realitycollective/webxr-interactions`](https://www.npmjs.com/package/@realitycollective/webxr-interactions) core.
+The native host adapter for the Reality Collective Interaction Extensions. A native app (OpenXR on Quest, CompositorServices on visionOS, or any other shell embedding a JavaScript engine such as Hermes) installs `globalThis.__rcHost`, and this package reads its `input` and `interactions` slices, and the optional `physics` slice, into the [`@realitycollective/webxr-interactions`](https://www.npmjs.com/package/@realitycollective/webxr-interactions) core.
 
 ```sh
 npm install @realitycollective/native-interactions
 ```
 
 It re-exports everything from the core, so this is the only interaction package your app needs.
+
+## Tested on a headset
+
+A native app built with this package passed on a Meta Quest 3 on 1 October 2026, played by a person and checked by its conformance kit.
+
+Known issue on native: the grab interaction does not work as it should yet. Pinch works.
 
 ## What it binds
 
@@ -16,6 +22,10 @@ It re-exports everything from the core, so this is the only interaction package 
 | **Hit-testing** | `__rcHost.interactions.hitRay` / `hitProximity` with IWSDK's semantics: the ray parameter to the closest point, and the distance to a target's SURFACE, clamped at zero. `setTargetRadius` tells the host each target's radius (0.1 m unless given) |
 | **Movement** | `__rcHost.interactions`, keyed by the target id you chose when you registered the object with the native scene |
 | **No engine dependency** | Assets and rendering stay in the native app; only numbers, strings, booleans and tuples cross the boundary |
+| **Pointer drawing** | The host is handed the resolved drawing every frame (`applyPointerVisuals`) and the app's display settings (`applyPointerDisplay`); `createNativeInteractions({ pointers, pointerDisplay })` shares one arbiter with the UI binding |
+| **Physics** | `NativePhysicsFacility` over the host's `physics` slice (the `physics` option): the host simulates, the binding decides held, released and rest as IWSDK does |
+| **Eye gaze** | `getFacts().eyeTracking` and `getEyeGazePose()` on the input slice; the provider applies the shared gaze-and-pinch rule |
+| **Proof on the device** | `nativeInteractionsHostConformanceCases()` (the kit, below) and the repository's native harness (`harness/native`), which the conversion pipeline builds into an app that runs every suite against the real host |
 
 ## Usage
 
@@ -55,6 +65,10 @@ A missing slice - neither passed in nor found on `globalThis.__rcHost` - throws 
 - **Haptics are routed by the app, as on IWSDK.** Press and grab feedback reach `pulse` when the app routes them, `routeHapticsToProvider((listener) => interactions.runtime.onFeedback(listener), interactions.provider)`, exactly as a web client does with `registerInteractions`. Neither setup routes them by itself.
 - **One port per interactable.** `TransformPort` is per object; the native host is one object serving every registered interactable, so `NativeTransformPort` binds one `targetId` onto it, the same idea as an engine adapter's port binding to one scene node.
 - **`NativeHit.targetId`** is renamed to the core's `interactableId` on the way through `NativeHitTester` - the native host names the thing it hit, the core names the thing it manages.
+
+## What a host reports for a hand, and what it is handed to draw
+
+`native-types.ts` states every input value a host reports, with its OpenXR source and resting value: a hand's `select` is the runtime's pinch gesture, 1 or 0, never a strength, and its `squeeze` is 0; a controller's are its trigger and grip values. Every hit query considers registered interactables only, never scenery, and a proximity hit's point is the surface point nearest the fingertip. The host is handed the resolved pointer drawing every frame (`applyPointerVisuals`: the ray stub's extent, radius and colour, the cursor's point, radius, opacity and offset, and which panel or object it sits on) and decides no display mode of its own. The native harness (`harness/native`) runs the whole kit on a device.
 
 ## Proving a host: the conformance kit
 
