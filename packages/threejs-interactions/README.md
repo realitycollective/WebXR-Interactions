@@ -17,6 +17,9 @@ It re-exports everything from [`@realitycollective/webxr-interactions`](https://
 | **Movement** | Moves and rotates three.js objects for grab, hinge, dial and slide |
 | **Desktop** | A mouse fallback, so the same scene is testable without a headset |
 | **Presence** | Show and hide the user's own hand and controller models, once you have registered them |
+| **Pointer visuals** | `ThreePointerVisuals` draws the app's `pointerDisplay` (IWSDK's ray stub and cursor disc by default) for every source: `createThreeInteractions({ pointerVisuals: { scene }, pointers, pointerDisplay })` |
+| **Physics** | `RapierPhysicsFacility`: pass `physics: { rapier }` with the Rapier module your app loads, and grab, throw and rest run over Rapier bodies with IWSDK's defaults; `ThreeTransformPort` gains the held pose |
+| **Eye gaze** | `WebXRInputProvider` reports `capabilities.eyeGaze` for a session with a gaze input source and applies the shared gaze-and-pinch rule |
 
 ## Presence
 
@@ -72,7 +75,9 @@ The tree lives on the geometry for as long as the geometry does. The adapter nev
 
 **Register a collider proxy.** Register a low-poly stand-in (a box, a sphere, a simplified hull) as the interactable object, and parent the detailed model to it or move both from the same transform. The proxy is what the ray and the poke test see; the model is what the player sees.
 
-Poke targeting (`hitProximity`) is a sphere test on each registered object's world position and bounding-sphere radius, so it costs the same whatever the mesh.
+Poke targeting (`hitProximity`) is a sphere test on each registered object's world position and bounding-sphere radius, so it costs the same whatever the mesh. A target with no geometry of its own (a bare `Group`) has no bounding sphere to read, so `register(id, object, targetRadius?)` takes an explicit radius for one - default 0.1 m, matching IWSDK's own default for a target registered without one.
+
+`hitRay` and `hitProximity` both drop a target hidden by `visible === false`, on itself or on any ancestor, even though three.js's own `Raycaster` ignores `visible` by design ([issue 14700](https://github.com/mrdoob/three.js/issues/14700)) - the adapter re-applies the rule itself.
 
 ## Peer dependencies
 
@@ -82,7 +87,7 @@ Poke targeting (`hitProximity`) is a sphere test on each registered object's wor
 
 ## Live demo
 
-The interaction playground - the full station set, mouse-capable on desktop, VR button for headsets: **[webxr-interactions.pages.dev](https://webxr-interactions.pages.dev)**
+The interaction playground - the full station set on every platform, mouse-capable on desktop, VR button for headsets; add `?engine=threejs` for this adapter: **[webxr-interactions.pages.dev](https://webxr-interactions.pages.dev)**
 
 ## Documentation
 

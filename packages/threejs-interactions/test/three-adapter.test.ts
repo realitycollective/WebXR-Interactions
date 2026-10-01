@@ -60,7 +60,7 @@ describe("ThreeHitTester", () => {
 });
 
 describe("ThreeTransformPort", () => {
-  it("applies offsets/rotations from rest and reports the rest world pose", () => {
+  it("applies offsets/rotations from rest and reports the live and rest world poses", () => {
     const parent = new Object3D();
     parent.position.set(1, 0, 0);
     const object = new Mesh(new BoxGeometry(0.1, 0.1, 0.1));
@@ -69,14 +69,15 @@ describe("ThreeTransformPort", () => {
     parent.updateMatrixWorld(true);
 
     const port = new ThreeTransformPort(object);
-    const rest = port.getWorldPose();
-    expect(rest.position).toEqual([1, 1, 0]);
+    expect(port.getRestWorldPose().position).toEqual([1, 1, 0]);
+    expect(port.getWorldPose().position).toEqual([1, 1, 0]);
 
     port.setLocalOffset([0, -0.02, 0]);
     expect(object.position.y).toBeCloseTo(0.98, 5);
     expect(port.getLocalOffset()[1]).toBeCloseTo(-0.02, 5);
-    // The rest world pose is unaffected by behaviour-applied offsets.
-    expect(port.getWorldPose().position).toEqual([1, 1, 0]);
+    // The live pose follows the offset; the rest pose does not.
+    expect(port.getWorldPose().position[1]).toBeCloseTo(0.98, 5);
+    expect(port.getRestWorldPose().position).toEqual([1, 1, 0]);
 
     port.setLocalRotation([0, 0.7071067811865476, 0, 0.7071067811865476]);
     expect(object.quaternion.y).toBeCloseTo(0.7071, 3);
@@ -281,6 +282,16 @@ describe("WebXRInputProvider native velocity", () => {
     return sample({ handedness: "left", targetRaySpace, hand }, poses);
   }
 
+  it("gives a controller its ray origin as its index tip, as IWSDK's input rig does", () => {
+    const snapshot = controllerSample();
+    expect(snapshot.indexTip).toEqual(snapshot.ray?.origin);
+    expect(snapshot.indexTip).not.toBe(snapshot.ray?.origin);
+  });
+
+  it("does not give a hand its ray origin as its index tip", () => {
+    expect(wristSample().indexTip).toBeUndefined();
+  });
+
   it("passes a controller grip pose's velocity through as tuples", () => {
     const snapshot = controllerSample({ linear: [1, 2, 3], angular: [0.4, 0.5, 0.6] });
     expect(snapshot.linearVelocity).toEqual([1, 2, 3]);
@@ -303,6 +314,38 @@ describe("WebXRInputProvider native velocity", () => {
     const angularOnly = controllerSample({ angular: [0, 2, 0] });
     expect(angularOnly.linearVelocity).toBeUndefined();
     expect(angularOnly.angularVelocity).toEqual([0, 2, 0]);
+  });
+
+  it("returns nothing while the app is not visible, as IWSDK's provider does", () => {
+    const targetRaySpace = {};
+    const gripSpace = {};
+    const poses = new Map<object, unknown>([
+      [targetRaySpace, pose([0, 1.5, -0.1])],
+      [gripSpace, pose([0.1, 1.2, -0.3])],
+    ]);
+    let visibilityState = "visible";
+    const session = {
+      get visibilityState() {
+        return visibilityState;
+      },
+      inputSources: [{ handedness: "right", targetRaySpace, gripSpace }],
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+    const frame = {
+      getPose: (space: object) => poses.get(space),
+      getJointPose: (joint: object) => poses.get(joint),
+    };
+    const provider = new WebXRInputProvider({
+      xr: { getSession: () => session, getReferenceSpace: () => ({}), getFrame: () => frame },
+      camera: new PerspectiveCamera(70, 4 / 3, 0.05, 100),
+    } as never);
+
+    expect(provider.sample().length).toBe(1);
+    visibilityState = "hidden";
+    expect(provider.sample()).toEqual([]);
+    visibilityState = "visible";
+    expect(provider.sample().length).toBe(1);
   });
 
   it("passes the wrist-fallback pose's velocity through the same way", () => {

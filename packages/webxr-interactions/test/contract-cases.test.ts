@@ -1,0 +1,703 @@
+/**
+ * The shipped `HitTester` and `TransformPort` conformance suites, tested
+ * against fakes.
+ *
+ * The five adapters run these cases for real, which proves they pass. This
+ * file proves the other half: that each case FAILS when a host breaks the
+ * one promise it checks. A contract case that cannot fail is a case that
+ * catches nothing, so every assertion inside `src/contract-cases.ts` gets a
+ * fake built to break it here - the same approach WebXR-UIExtensions' own
+ * `contract-cases.test.ts` takes for `windowHostContractCases()`.
+ */
+import { describe, expect, it } from "vitest";
+import {
+  surfacePointOnSphere,
+  hitTesterContractCases,
+  transformPortContractCases,
+  type HitTester,
+  type HitTesterContractSubject,
+  type HoldRelease,
+  type InteractableHit,
+  type PoseTuple,
+  type QuatTuple,
+  type TransformPort,
+  type TransformPortContractSubject,
+  coneHitForSpheres,
+  quatMultiply,
+  vAdd,
+  vApplyQuat,
+  type SphereTarget,
+} from "../src/index.js";
+import type { RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
+
+// ---------------------------------------------------------------------------
+// HitTester
+// ---------------------------------------------------------------------------
+
+const EMPTY = "an empty scene answers a ray with null";
+const RAY_HIT = "a ray through a placed target returns its id, a positive distance and a point near the ray";
+const RAY_AWAY = "a ray pointing away from the target returns null";
+const PROXIMITY = "hitProximity finds a target inside its radius and misses outside it";
+const NEARER = "with two targets on one ray, the nearer one wins";
+const FRESH_HIT = "each hit and its point are fresh values the caller owns";
+const CONE_DIRECT = "hitCone, when present, answers a ray that reaches a target with that target at angular distance zero";
+const CONE_NEAR = "hitCone, when present, finds a target inside the cone that the ray itself misses";
+const CONE_OUTSIDE = "hitCone, when present, ignores a target outside the cone and one beyond the length";
+const CONE_PREFER = "hitCone, when present, prefers the target nearer the axis, and the nearer of two on the axis";
+const CONE_HIDDEN = "hitCone, when present, never answers with a target hidden by visible alone, when the driver can toggle it";
+
+/** One deliberate defect at a time, so each broken-fake test names the case it breaks. */
+interface HitTesterFakeConfig {
+  /** hitRay hits any target in front of the ray, however far it passes. */
+  ignoresRadius?: boolean;
+  /** Report proximity distance to the target's centre rather than its surface. */
+  centreDistance?: boolean;
+  /** Answers a hit even with nothing placed. */
+  emptySceneHit?: boolean;
+  /** Reports a different id than the target it actually found. */
+  wrongId?: boolean;
+  /** Reports a non-positive distance for a hit in front of the ray. */
+  negativeDistance?: boolean;
+  /** Reports a point far from the ray, rather than at or near it. */
+  wrongPoint?: boolean;
+  /** Answers a ray hit regardless of which way the ray points. */
+  ignoresDirection?: boolean;
+  /** hitProximity never finds anything, even dead on the target. */
+  blindProximity?: boolean;
+  /** hitProximity finds a target however far the query point is. */
+  greedyProximity?: boolean;
+  /** hitProximity reports the target's centre as its point, not the surface point nearest the query. */
+  centrePoint?: boolean;
+  /** hitRay keeps the first target it finds along a ray, not the nearest. */
+  pickFarther?: boolean;
+  /** Hands back the target's own stored position as the hit point. */
+  sharedPoint?: boolean;
+  /** placeBare registers a bare target at radius 0 rather than the 0.1 m default. */
+  ignoresDefaultRadius?: boolean;
+  /** Never excludes a target setVisible(id, false) hid. */
+  ignoresVisible?: boolean;
+  /** No hitCone at all: the optional member is left out. */
+  noCone?: boolean;
+  /** hitCone answers any placed target, however far off the axis or beyond the length. */
+  coneIgnoresAngle?: boolean;
+  /** hitCone keeps the farther of two on-axis targets. */
+  coneFarther?: boolean;
+  /** hitCone still answers with a hidden target. */
+  coneIgnoresVisible?: boolean;
+}
+
+const BARE_RADIUS = 0.1;
+
+class FakeHitTesterHost implements HitTester {
+  private readonly targets = new Map<string, { position: Vec3Tuple; radius: number }>();
+  private readonly hidden = new Set<string>();
+
+  hitCone?: (ray: RayTuple, halfAngle: number, maxLength: number) => InteractableHit | null;
+
+  constructor(private readonly config: HitTesterFakeConfig = {}) {
+    if (!config.noCone) {
+      this.hitCone = (ray, halfAngle, maxLength) => {
+        const spheres: SphereTarget[] = [];
+        for (const [id, target] of this.targets) {
+          if (!config.coneIgnoresVisible && !this.showing(id)) continue;
+          spheres.push({ id, center: target.position, radius: target.radius });
+        }
+        if (config.coneIgnoresAngle) {
+          const first = spheres[0];
+          return first ? { interactableId: first.id, distance: dist(ray.origin, first.center), point: first.center } : null;
+        }
+        if (config.coneFarther) {
+          let farthest: InteractableHit | null = null;
+          for (const sphere of spheres) {
+            const hit = coneHitForSpheres(ray, [sphere], halfAngle, maxLength);
+            if (hit && (!farthest || hit.distance > farthest.distance)) farthest = hit;
+          }
+          return farthest;
+        }
+        return coneHitForSpheres(ray, spheres, halfAngle, maxLength);
+      };
+    }
+  }
+
+  place(id: string, position: Vec3Tuple, radius: number): void {
+    this.targets.set(id, { position, radius });
+  }
+
+  placeBare(id: string, position: Vec3Tuple): void {
+    this.targets.set(id, { position, radius: this.config.ignoresDefaultRadius ? 0 : BARE_RADIUS });
+  }
+
+  setVisible(id: string, visible: boolean): void {
+    if (visible) this.hidden.delete(id);
+    else this.hidden.add(id);
+  }
+
+  private showing(id: string): boolean {
+    return this.config.ignoresVisible || !this.hidden.has(id);
+  }
+
+  hitRay(ray: RayTuple): InteractableHit | null {
+    if (this.config.emptySceneHit && this.targets.size === 0) {
+      return { interactableId: "ghost", distance: 1, point: [0, 0, 0] };
+    }
+    let best: [string, number] | null = null;
+    for (const [id, target] of this.targets) {
+      if (!this.showing(id)) continue;
+      const t = along(ray, target.position);
+      if (!this.config.ignoresDirection && t <= 0) continue;
+      // IWSDK's rule: the target's centre within its radius of the ray.
+      const closest: Vec3Tuple = [
+        ray.origin[0] + ray.direction[0] * t,
+        ray.origin[1] + ray.direction[1] * t,
+        ray.origin[2] + ray.direction[2] * t,
+      ];
+      if (!this.config.ignoresRadius && dist(closest, target.position) > target.radius) continue;
+      const wins = best === null || (this.config.pickFarther ? t > best[1] : t < best[1]);
+      if (wins) best = [id, t];
+    }
+    if (!best) return null;
+    const [id, t] = best;
+    const target = this.targets.get(id)!;
+    return {
+      interactableId: this.config.wrongId ? "wrong" : id,
+      distance: this.config.negativeDistance ? -Math.abs(t) : t,
+      point: this.config.wrongPoint
+        ? [target.position[0] + 50, target.position[1], target.position[2]]
+        : this.pointOf(target.position),
+    };
+  }
+
+  private pointOf(position: Vec3Tuple): Vec3Tuple {
+    return this.config.sharedPoint ? position : [position[0], position[1], position[2]];
+  }
+
+  hitProximity(point: Vec3Tuple, radius: number): InteractableHit | null {
+    if (this.config.blindProximity) return null;
+    for (const [id, target] of this.targets) {
+      if (!this.showing(id)) continue;
+      const centre = dist(point, target.position);
+      const surface = Math.max(0, centre - target.radius);
+      if (this.config.greedyProximity || surface <= radius) {
+        const distance = this.config.centreDistance ? centre : surface;
+        const at = this.config.centrePoint ? target.position : surfacePointOnSphere(target.position, target.radius, point);
+        return { interactableId: id, distance, point: this.pointOf(at) };
+      }
+    }
+    return null;
+  }
+}
+
+function along(ray: RayTuple, point: Vec3Tuple): number {
+  return (
+    (point[0] - ray.origin[0]) * ray.direction[0] +
+    (point[1] - ray.origin[1]) * ray.direction[1] +
+    (point[2] - ray.origin[2]) * ray.direction[2]
+  );
+}
+
+function dist(a: Vec3Tuple, b: Vec3Tuple): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function makeSubject(config: HitTesterFakeConfig = {}): HitTesterContractSubject {
+  const host = new FakeHitTesterHost(config);
+  return { hitTester: host, driver: host };
+}
+
+function runHitTesterCase(name: string, config: HitTesterFakeConfig): void {
+  const contractCase = hitTesterContractCases().find((entry) => entry.name === name);
+  if (!contractCase) throw new Error(`no contract case named "${name}"`);
+  contractCase.run(makeSubject(config));
+}
+
+describe("hitTesterContractCases", () => {
+  it("ships named cases, each with a run function", () => {
+    const cases = hitTesterContractCases();
+    expect(cases.length).toBeGreaterThan(0);
+    for (const contractCase of cases) {
+      expect(typeof contractCase.name).toBe("string");
+      expect(typeof contractCase.run).toBe("function");
+    }
+    // Two calls hand back the same data; nothing is rebuilt per caller.
+    expect(hitTesterContractCases()).toBe(cases);
+  });
+
+  it("passes a conforming host", () => {
+    for (const contractCase of hitTesterContractCases()) {
+      expect(() => contractCase.run(makeSubject())).not.toThrow();
+    }
+  });
+});
+
+describe("hitTesterContractCases catches a broken host", () => {
+  it("rejects a host whose proximity point is the centre, not the surface point nearest the query (INT-G7 near cursor)", () => {
+    expect(() =>
+      runHitTesterCase("hitProximity's point is the surface point nearest the query point, never the centre", {
+        centrePoint: true,
+      }),
+    ).toThrow(/the proximity point\[0\] must be close to 0\.1, got 0/);
+  });
+
+  it("rejects a host that measures proximity to the centre, not the surface", () => {
+    expect(() =>
+      runHitTesterCase("hitProximity reports the distance to the target's SURFACE, clamped at zero", {
+        centreDistance: true,
+      }),
+    ).toThrow(/distance must be to the surface, 0\.03 within 1 mm, got 0\.13/);
+  });
+
+  it("rejects a host whose ray hits a target it passes far from", () => {
+    expect(() =>
+      runHitTesterCase("a ray that passes a target farther than its radius misses it", { ignoresRadius: true }),
+    ).toThrow(/must miss it/);
+  });
+
+  it("rejects a host that finds a target by its centre within the query radius", () => {
+    expect(() =>
+      runHitTesterCase("hitProximity misses a target whose surface is farther than the query radius", {
+        greedyProximity: true,
+      }),
+    ).toThrow(/outside a 2 cm query/);
+  });
+
+  it("rejects a host that answers a hit on an empty scene", () => {
+    expect(() => runHitTesterCase(EMPTY, { emptySceneHit: true })).toThrow(
+      /hitRay over an empty scene must return null/,
+    );
+  });
+
+  it("rejects a hit that names the wrong interactable", () => {
+    expect(() => runHitTesterCase(RAY_HIT, { wrongId: true })).toThrow(
+      /expected interactableId "target"/,
+    );
+  });
+
+  it("rejects a hit with a non-positive distance", () => {
+    expect(() => runHitTesterCase(RAY_HIT, { negativeDistance: true })).toThrow(
+      /distance must be positive/,
+    );
+  });
+
+  it("rejects a hit whose point is nowhere near the ray", () => {
+    expect(() => runHitTesterCase(RAY_HIT, { wrongPoint: true })).toThrow(
+      /point\[0\] must be close to/,
+    );
+  });
+
+  it("rejects a host that answers a ray pointing away from every target", () => {
+    expect(() => runHitTesterCase(RAY_AWAY, { ignoresDirection: true })).toThrow(
+      /must return null/,
+    );
+  });
+
+  it("rejects a hitProximity that misses a target dead on its own position", () => {
+    expect(() => runHitTesterCase(PROXIMITY, { blindProximity: true })).toThrow(
+      /must find it/,
+    );
+  });
+
+  it("rejects a hitProximity that finds a target far outside the query radius", () => {
+    expect(() => runHitTesterCase(PROXIMITY, { greedyProximity: true })).toThrow(
+      /must return null/,
+    );
+  });
+
+  it("rejects a host that keeps the farther of two targets", () => {
+    expect(() => runHitTesterCase(NEARER, { pickFarther: true })).toThrow(
+      /the nearer target must win, got "far"/,
+    );
+  });
+
+  it("rejects a host that hands back its own stored point", () => {
+    expect(() => runHitTesterCase(FRESH_HIT, { sharedPoint: true })).toThrow(
+      /hitRay must return a new hit and point each call/,
+    );
+  });
+
+  it("rejects a host that gives a bare target a zero radius instead of the 0.1 m default", () => {
+    expect(() =>
+      runHitTesterCase(
+        "hitProximity treats a target with no declared radius as a 0.1 m sphere, when the driver can register one",
+        { ignoresDefaultRadius: true },
+      ),
+    ).toThrow(/must be found within a 0\.05 m query/);
+  });
+
+  it("rejects a host that still answers with a target hidden by visible alone", () => {
+    expect(() =>
+      runHitTesterCase("an object hidden by visible alone is never hit, when the driver can toggle it", {
+        ignoresVisible: true,
+      }),
+    ).toThrow(/must not hit a target hidden by visible alone/);
+  });
+
+  it("skips every cone case on a tester with no hitCone", () => {
+    for (const name of [CONE_DIRECT, CONE_NEAR, CONE_OUTSIDE, CONE_PREFER, CONE_HIDDEN]) {
+      expect(() => runHitTesterCase(name, { noCone: true })).not.toThrow();
+    }
+  });
+
+  it("rejects a hitCone that answers targets outside the cone or beyond the length", () => {
+    expect(() => runHitTesterCase(CONE_OUTSIDE, { coneIgnoresAngle: true })).toThrow(/outside the cone or beyond the length/);
+  });
+
+  it("rejects a hitCone that keeps the farther of two on-axis targets", () => {
+    expect(() => runHitTesterCase(CONE_PREFER, { coneFarther: true })).toThrow(/did not prefer the nearer/);
+  });
+
+  it("rejects a hitCone that still answers with a hidden target", () => {
+    expect(() => runHitTesterCase(CONE_HIDDEN, { coneIgnoresVisible: true })).toThrow(/hidden target/);
+  });
+
+  it("rejects a hitCone that cannot find a target the ray misses inside the cone", () => {
+    // A tester whose cone is only a ray test: hitCone answers as hitRay does.
+    const host = new FakeHitTesterHost();
+    host.hitCone = (ray) => host.hitRay(ray);
+    const contractCase = hitTesterContractCases().find((entry) => entry.name === CONE_NEAR)!;
+    expect(() => contractCase.run({ hitTester: host, driver: host })).toThrow(/did not find the target inside the cone/);
+  });
+
+  it("fails loudly when asked for a case that does not exist", () => {
+    expect(() => runHitTesterCase("no such case", {})).toThrow(/no contract case named/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TransformPort
+// ---------------------------------------------------------------------------
+
+const OFFSET = "setLocalOffset then getLocalOffset returns the same offset";
+const POSE = "getWorldPose returns finite numbers and a unit quaternion";
+const ROTATION = "setLocalRotation with a unit quaternion does not throw";
+const REST = "getRestWorldPose returns the pose captured at registration";
+const LIVE_AT_REST = "before any write, the live pose is the rest pose";
+const LIVE_OFFSET = "getWorldPose follows setLocalOffset while getRestWorldPose stays put";
+const LIVE_ROTATION = "getWorldPose follows setLocalRotation while getRestWorldPose stays put";
+const LIVE_WORLD = "setWorldPose, when present, is what getWorldPose reads back";
+const FRESH = "every returned tuple is a fresh value the caller owns";
+const NOT_KEPT = "a tuple passed in is not kept";
+const EFFECT = "setEffect, when present, accepts scale and emissive without throwing";
+const HELD = "Held: beginHold holds a fixed setWorldPose without falling, when the subject has physics";
+const RELEASED = "Released: endHold sends the body away with the release velocity, when the subject has physics";
+const RESET = "Reset: setWorldPose while not held teleports to the pose and clears velocity, when the subject has physics";
+
+/** A rest pose away from the origin and turned a quarter about Y. */
+const REST_POSE: PoseTuple = { position: [1, 0.5, -2], quaternion: [0, Math.SQRT1_2, 0, Math.SQRT1_2] };
+
+/** One deliberate defect at a time, so each broken-port test names the case it breaks. */
+interface TransformPortFakeConfig {
+  /** getLocalOffset does not report back what setLocalOffset was given. */
+  offsetMismatch?: boolean;
+  /** getWorldPose reports a NaN. */
+  nonFinitePose?: boolean;
+  /** getWorldPose reports a quaternion that is not unit length. */
+  nonUnitQuaternion?: boolean;
+  /** setLocalRotation throws even on a unit quaternion. */
+  rotationThrows?: boolean;
+  /** getRestWorldPose reports the origin rather than the captured rest. */
+  restAtOrigin?: boolean;
+  /** getRestWorldPose reports the live pose, so it moves with every write. */
+  restFollowsWrites?: boolean;
+  /** getWorldPose reports the rest pose, however the object has moved. */
+  liveIsRest?: boolean;
+  /** setLocalOffset adds the offset in world axes, ignoring the rest rotation. */
+  offsetIgnoresRestFrame?: boolean;
+  /** setLocalRotation replaces the rest orientation rather than composing with it. */
+  rotationReplacesRest?: boolean;
+  /** Whether this port carries the optional setWorldPose member at all. */
+  hasSetWorldPose?: boolean;
+  /** setWorldPose accepts the pose but getWorldPose never shows it. */
+  worldPoseIgnored?: boolean;
+  /** getWorldPose, getRestWorldPose and getLocalOffset hand back stored tuples. */
+  sharesTuples?: boolean;
+  /** setLocalOffset keeps the caller's tuple. */
+  keepsOffsetInput?: boolean;
+  /** setWorldPose keeps the caller's pose. */
+  keepsPoseInput?: boolean;
+  /** Whether this port carries the optional setEffect member at all. */
+  hasSetEffect?: boolean;
+  /** setEffect throws when called. */
+  effectThrows?: boolean;
+  /** Whether this port carries beginHold/endHold and the subject a physics driver at all. */
+  hasPhysics?: boolean;
+  /** Gravity keeps acting on a held body, so it falls instead of staying put. */
+  heldFalls?: boolean;
+  /** endHold ignores the release velocity it was given. */
+  releaseDropsVelocity?: boolean;
+  /** setWorldPose while not held keeps the body's velocity instead of clearing it. */
+  resetKeepsVelocity?: boolean;
+}
+
+function copyPose(pose: PoseTuple): PoseTuple {
+  return { position: [...pose.position], quaternion: [...pose.quaternion] };
+}
+
+/** Gravity used by the fake physics simulation below - plain -9.8 m/s² on Y. */
+const GRAVITY_Y = -9.8;
+
+/** A port over one object that sits at {@link REST_POSE} with no parent. */
+class FakeTransformPortHost implements TransformPort {
+  private readonly rest = copyPose(REST_POSE);
+  private live = copyPose(REST_POSE);
+  private offset: Vec3Tuple = [0, 0, 0];
+  private velocity: Vec3Tuple = [0, 0, 0];
+  private held = false;
+  readonly setWorldPose?: (pose: PoseTuple) => void;
+  readonly setEffect?: (effect: { scale?: number; emissive?: number }) => void;
+  readonly beginHold?: () => void;
+  readonly endHold?: (release: HoldRelease) => void;
+
+  constructor(private readonly config: TransformPortFakeConfig = {}) {
+    if (config.hasSetWorldPose) {
+      this.setWorldPose = (pose) => {
+        if (this.config.worldPoseIgnored) return;
+        this.live = this.config.keepsPoseInput ? pose : copyPose(pose);
+        // Real "reset" behaviour: teleporting while not held clears velocity.
+        if (this.config.hasPhysics && !this.held && !this.config.resetKeepsVelocity) {
+          this.velocity = [0, 0, 0];
+        }
+      };
+    }
+    if (config.hasSetEffect) {
+      this.setEffect = () => {
+        if (this.config.effectThrows) throw new Error("effect rejected");
+      };
+    }
+    if (config.hasPhysics) {
+      this.beginHold = () => {
+        this.held = true;
+      };
+      this.endHold = (release) => {
+        this.held = false;
+        this.velocity = this.config.releaseDropsVelocity ? [0, 0, 0] : [...release.linearVelocity];
+      };
+    }
+  }
+
+  /** Advance the fake simulation: gravity + velocity integration, skipped while held. */
+  step(dtSeconds: number): void {
+    if (this.held && !this.config.heldFalls) return;
+    this.velocity = [this.velocity[0], this.velocity[1] + GRAVITY_Y * dtSeconds, this.velocity[2]];
+    this.live.position = [
+      this.live.position[0] + this.velocity[0] * dtSeconds,
+      this.live.position[1] + this.velocity[1] * dtSeconds,
+      this.live.position[2] + this.velocity[2] * dtSeconds,
+    ];
+  }
+
+  getWorldPose(): PoseTuple {
+    if (this.config.nonFinitePose) return { position: [0, Number.NaN, 0], quaternion: [0, 0, 0, 1] };
+    if (this.config.nonUnitQuaternion) return { position: [0, 0, 0], quaternion: [1, 1, 0, 0] };
+    const pose = this.config.liveIsRest ? this.rest : this.live;
+    return this.config.sharesTuples ? pose : copyPose(pose);
+  }
+
+  getRestWorldPose(): PoseTuple {
+    if (this.config.restAtOrigin) return { position: [0, 0, 0], quaternion: [0, 0, 0, 1] };
+    const pose = this.config.restFollowsWrites ? this.live : this.rest;
+    return this.config.sharesTuples ? pose : copyPose(pose);
+  }
+
+  getLocalOffset(): Vec3Tuple {
+    if (this.config.offsetMismatch) return [this.offset[0] + 1, this.offset[1], this.offset[2]];
+    return this.config.sharesTuples ? this.offset : [...this.offset];
+  }
+
+  setLocalOffset(offset: Vec3Tuple): void {
+    this.offset = this.config.keepsOffsetInput ? offset : [...offset];
+    const moved = this.config.offsetIgnoresRestFrame ? offset : vApplyQuat(offset, this.rest.quaternion);
+    this.live.position = vAdd(this.rest.position, moved);
+  }
+
+  setLocalRotation(quaternion: QuatTuple): void {
+    if (this.config.rotationThrows) throw new Error("rotation rejected");
+    this.live.quaternion = this.config.rotationReplacesRest
+      ? [...quaternion]
+      : quatMultiply(this.rest.quaternion, quaternion);
+  }
+}
+
+function makePortSubject(config: TransformPortFakeConfig = {}): TransformPortContractSubject {
+  const host = new FakeTransformPortHost(config);
+  return {
+    port: host,
+    rest: copyPose(REST_POSE),
+    ...(config.hasPhysics ? { physics: { step: (dt: number) => host.step(dt) } } : {}),
+  };
+}
+
+function runTransformPortCase(name: string, config: TransformPortFakeConfig): void {
+  const contractCase = transformPortContractCases().find((entry) => entry.name === name);
+  if (!contractCase) throw new Error(`no contract case named "${name}"`);
+  contractCase.run(makePortSubject(config));
+}
+
+describe("transformPortContractCases", () => {
+  it("ships named cases, each with a run function", () => {
+    const cases = transformPortContractCases();
+    expect(cases.length).toBeGreaterThan(0);
+    for (const contractCase of cases) {
+      expect(typeof contractCase.name).toBe("string");
+      expect(typeof contractCase.run).toBe("function");
+    }
+    expect(transformPortContractCases()).toBe(cases);
+  });
+
+  it("passes a conforming port with no optional members", () => {
+    for (const contractCase of transformPortContractCases()) {
+      expect(() => contractCase.run(makePortSubject())).not.toThrow();
+    }
+  });
+
+  it("passes a conforming port that also implements setWorldPose and setEffect", () => {
+    for (const contractCase of transformPortContractCases()) {
+      expect(() => contractCase.run(makePortSubject({ hasSetWorldPose: true, hasSetEffect: true }))).not.toThrow();
+    }
+  });
+
+  it("passes a conforming port that also implements physics-driven beginHold/endHold", () => {
+    for (const contractCase of transformPortContractCases()) {
+      expect(() =>
+        contractCase.run(makePortSubject({ hasSetWorldPose: true, hasPhysics: true })),
+      ).not.toThrow();
+    }
+  });
+});
+
+describe("transformPortContractCases catches a broken port", () => {
+  it("rejects a port whose getLocalOffset does not match what was set", () => {
+    expect(() => runTransformPortCase(OFFSET, { offsetMismatch: true })).toThrow(
+      /getLocalOffset\(\)\[0\] must be close to 0.3/,
+    );
+  });
+
+  it("rejects a getWorldPose with a non-finite number", () => {
+    expect(() => runTransformPortCase(POSE, { nonFinitePose: true })).toThrow(/must return finite numbers/);
+  });
+
+  it("rejects a getWorldPose with a non-unit quaternion", () => {
+    expect(() => runTransformPortCase(POSE, { nonUnitQuaternion: true })).toThrow(/must be a unit quaternion/);
+  });
+
+  it("rejects a setLocalRotation that throws on a unit quaternion", () => {
+    expect(() => runTransformPortCase(ROTATION, { rotationThrows: true })).toThrow(
+      /setLocalRotation\(unit quaternion\) must not throw/,
+    );
+  });
+
+  it("rejects a getRestWorldPose that is not the captured rest", () => {
+    expect(() => runTransformPortCase(REST, { restAtOrigin: true })).toThrow(
+      /getRestWorldPose\(\)\.position\[0\] must be close to 1/,
+    );
+  });
+
+  it("rejects a live pose that does not start at rest", () => {
+    expect(() => runTransformPortCase(LIVE_AT_REST, { nonFinitePose: true })).toThrow(/getWorldPose\(\)\.position/);
+  });
+
+  it("rejects a getWorldPose that reports the rest pose after the object moved", () => {
+    expect(() => runTransformPortCase(LIVE_OFFSET, { liveIsRest: true })).toThrow(
+      /getWorldPose\(\)\.position after setLocalOffset/,
+    );
+    expect(() => runTransformPortCase(LIVE_ROTATION, { liveIsRest: true })).toThrow(
+      /getWorldPose\(\)\.quaternion after setLocalRotation/,
+    );
+    expect(() => runTransformPortCase(LIVE_WORLD, { hasSetWorldPose: true, liveIsRest: true })).toThrow(
+      /getWorldPose\(\) after setWorldPose/,
+    );
+  });
+
+  it("rejects a getRestWorldPose that moves with every write", () => {
+    expect(() => runTransformPortCase(LIVE_OFFSET, { restFollowsWrites: true })).toThrow(
+      /getRestWorldPose\(\) after setLocalOffset/,
+    );
+    expect(() => runTransformPortCase(LIVE_ROTATION, { restFollowsWrites: true })).toThrow(
+      /getRestWorldPose\(\) after setLocalRotation/,
+    );
+    expect(() => runTransformPortCase(LIVE_WORLD, { hasSetWorldPose: true, restFollowsWrites: true })).toThrow(
+      /getRestWorldPose\(\) after setWorldPose/,
+    );
+  });
+
+  it("rejects offsets and rotations that ignore the rest frame", () => {
+    expect(() => runTransformPortCase(LIVE_OFFSET, { offsetIgnoresRestFrame: true })).toThrow(
+      /getWorldPose\(\)\.position after setLocalOffset/,
+    );
+    expect(() => runTransformPortCase(LIVE_ROTATION, { rotationReplacesRest: true })).toThrow(
+      /getWorldPose\(\)\.quaternion after setLocalRotation/,
+    );
+  });
+
+  it("rejects a setWorldPose that getWorldPose never shows", () => {
+    expect(() => runTransformPortCase(LIVE_WORLD, { hasSetWorldPose: true, worldPoseIgnored: true })).toThrow(
+      /getWorldPose\(\) after setWorldPose/,
+    );
+  });
+
+  it("rejects a port that hands back its stored tuples", () => {
+    expect(() => runTransformPortCase(FRESH, { sharesTuples: true })).toThrow(/must not change the port/);
+  });
+
+  it("rejects a port that keeps the caller's tuples", () => {
+    expect(() => runTransformPortCase(NOT_KEPT, { keepsOffsetInput: true })).toThrow(
+      /getLocalOffset\(\) after the caller reused its tuple/,
+    );
+    expect(() => runTransformPortCase(NOT_KEPT, { hasSetWorldPose: true, keepsPoseInput: true })).toThrow(
+      /getWorldPose\(\) after the caller reused its tuple/,
+    );
+  });
+
+  it("rejects a setEffect that throws", () => {
+    expect(() => runTransformPortCase(EFFECT, { hasSetEffect: true, effectThrows: true })).toThrow(
+      /setEffect\(\{ scale, emissive \}\) must not throw/,
+    );
+  });
+
+  it("rejects a held body that still falls under gravity", () => {
+    expect(() =>
+      runTransformPortCase(HELD, { hasSetWorldPose: true, hasPhysics: true, heldFalls: true }),
+    ).toThrow(/getWorldPose\(\) after \d+ held steps/);
+  });
+
+  it("rejects an endHold that drops the release velocity it was given", () => {
+    expect(() =>
+      runTransformPortCase(RELEASED, { hasPhysics: true, releaseDropsVelocity: true }),
+    ).toThrow(/must move the body that way within one step/);
+  });
+
+  it("rejects a reset setWorldPose that keeps the body's previous velocity", () => {
+    expect(() =>
+      runTransformPortCase(RESET, { hasSetWorldPose: true, hasPhysics: true, resetKeepsVelocity: true }),
+    ).toThrow(/getWorldPose\(\) one step after a reset setWorldPose/);
+  });
+
+  it("skips every cone case on a tester with no hitCone", () => {
+    for (const name of [CONE_DIRECT, CONE_NEAR, CONE_OUTSIDE, CONE_PREFER, CONE_HIDDEN]) {
+      expect(() => runHitTesterCase(name, { noCone: true })).not.toThrow();
+    }
+  });
+
+  it("rejects a hitCone that answers targets outside the cone or beyond the length", () => {
+    expect(() => runHitTesterCase(CONE_OUTSIDE, { coneIgnoresAngle: true })).toThrow(/outside the cone or beyond the length/);
+  });
+
+  it("rejects a hitCone that keeps the farther of two on-axis targets", () => {
+    expect(() => runHitTesterCase(CONE_PREFER, { coneFarther: true })).toThrow(/did not prefer the nearer/);
+  });
+
+  it("rejects a hitCone that still answers with a hidden target", () => {
+    expect(() => runHitTesterCase(CONE_HIDDEN, { coneIgnoresVisible: true })).toThrow(/hidden target/);
+  });
+
+  it("rejects a hitCone that cannot find a target the ray misses inside the cone", () => {
+    // A tester whose cone is only a ray test: hitCone answers as hitRay does.
+    const host = new FakeHitTesterHost();
+    host.hitCone = (ray) => host.hitRay(ray);
+    const contractCase = hitTesterContractCases().find((entry) => entry.name === CONE_NEAR)!;
+    expect(() => contractCase.run({ hitTester: host, driver: host })).toThrow(/did not find the target inside the cone/);
+  });
+
+  it("fails loudly when asked for a case that does not exist", () => {
+    expect(() => runTransformPortCase("no such case", {})).toThrow(/no contract case named/);
+  });
+});

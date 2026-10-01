@@ -117,6 +117,33 @@ describe("poke priority and grab", () => {
     expect(enter).toContain("handle");
   });
 
+  it("honours the interactable's own pokeRadius as its touch hover distance", () => {
+    // "handle" keeps the 15 cm default; "plate" asks for 12 cm. The touch query
+    // goes out at the largest enter distance registered plus the 5 cm
+    // hysteresis, and a hit counts only when it is inside the band of the
+    // interactable it landed on. The grab query follows at the grab radius.
+    runtime.registerInteractable(
+      { id: "plate", behaviours: [{ kind: "press" }], pokeRadius: 0.12 },
+      { transform: new FakeTransform() },
+    );
+    hitTester.proximityTarget = "plate";
+    hitTester.proximityDistance = 0.1;
+    provider.sources = [handSource("right-hand")];
+    runtime.update(1 / 60);
+    expect(hitTester.proximityRadii).toEqual([0.2, 0.07]);
+    expect(events.filter((e) => e.type === "hoverEnter").map((e) => e.interactableId)).toContain("plate");
+
+    // A 16 cm fingertip over "handle" is outside handle's 15 cm enter
+    // distance, even though the query radius was wide enough to return it.
+    // A fresh source, so no hover hysteresis carries over from the plate.
+    events.length = 0;
+    hitTester.proximityTarget = "handle";
+    hitTester.proximityDistance = 0.16;
+    provider.sources = [handSource("left-hand", { handedness: "left" })];
+    runtime.update(1 / 60);
+    expect(events.filter((e) => e.type === "hoverEnter").map((e) => e.interactableId)).not.toContain("handle");
+  });
+
   it("hand pinch on a grab-only target grabs instead of pressing", () => {
     hitTester.proximityTarget = "handle";
     provider.sources = [handSource("right-hand", { select: 1 })];
@@ -294,5 +321,90 @@ describe("lifecycle", () => {
     expect(runtime.getState("toggle")?.value).toBe(1);
     const press = runtime.getBehaviour<PressBehaviour>("toggle", "press");
     expect(press?.isLatched).toBe(true);
+  });
+});
+
+describe("grab suspends and resumes physics via beginHold/endHold", () => {
+  let transform: FakeTransform;
+
+  beforeEach(() => {
+    provider = new FakeProvider();
+    hitTester = new FakeHitTester();
+    runtime = new InteractionRuntime({ provider, hitTester });
+    transform = new FakeTransform();
+    runtime.registerInteractable({ id: "prop", behaviours: [{ kind: "grab" }] }, { transform });
+    hitTester.rayTarget = "prop";
+  });
+
+  it("calls beginHold on grab start and endHold with the OBJECT's velocity over the last physics step on a normal release", () => {
+    // The core throw rule (`release-velocity.ts`): IWSDK hands Havok the
+    // held object's pose every frame and the body keeps the velocity of its
+    // last 1/60 s step, so the throw is the object's velocity, not the
+    // source's reported one.
+    const grip = (z: number) => ({ position: [0, 1, z] as [number, number, number], quaternion: [0, 0, 0, 1] as [number, number, number, number] });
+    provider.sources = [raySource("right", { squeeze: 1, gripPose: grip(-0.4) })];
+    runtime.update(1 / 60);
+    expect(transform.holdStarts).toBe(1);
+    expect(transform.held).toBe(true);
+
+    // The grip moves 6 cm forward in one 1/60 s frame: 3.6 m/s along -Z.
+    provider.sources = [raySource("right", { squeeze: 1, gripPose: grip(-0.46) })];
+    runtime.update(1 / 60);
+    provider.sources = [
+      raySource("right", { squeeze: 0, gripPose: grip(-0.46), linearVelocity: [1, 2, 3], angularVelocity: [0, 1, 0] }),
+    ];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toHaveLength(1);
+    const release = transform.releases[0]!;
+    expect(release.linearVelocity[0]).toBeCloseTo(0, 6);
+    expect(release.linearVelocity[1]).toBeCloseTo(0, 6);
+    expect(release.linearVelocity[2]).toBeCloseTo(-3.6, 6);
+    expect(release.angularVelocity).toEqual([0, 0, 0]);
+  });
+
+  it("a source that vanishes mid-hold still ends the hold, with zero velocity", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    provider.sources = []; // the source stops reporting altogether
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("unregistering the held interactable ends the hold, with zero velocity", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    runtime.unregisterInteractable("prop");
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("disabling the held interactable ends the hold, with zero velocity", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    runtime.setInteractableEnabled("prop", false);
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("disposing the runtime ends every still-held hold, with zero velocity, so physics is never left suspended", () => {
+    provider.sources = [raySource("right", { squeeze: 1 })];
+    runtime.update(1 / 60);
+    expect(transform.held).toBe(true);
+
+    runtime.dispose();
+    expect(transform.held).toBe(false);
+    expect(transform.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+
+    // Idempotent: a second dispose must not call endHold again.
+    runtime.dispose();
+    expect(transform.releases).toHaveLength(1);
   });
 });

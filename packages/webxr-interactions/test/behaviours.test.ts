@@ -159,7 +159,66 @@ describe("GrabBehaviour (poseOnly)", () => {
     expect(grab.getValue()).toBe(0);
   });
 
-  it("native fulfilment never writes the transform", () => {
+  it("suspends physics on grab start and resumes it with the object's velocity over the last physics step on grab end", () => {
+    const grab = new GrabBehaviour({}, "poseOnly");
+    const t = new FakeTransform();
+    const { context } = ctx(t);
+    const holder: InteractorInfo = {
+      ...interactor,
+      gripPose: { position: [0, 1, -0.4], quaternion: [0, 0, 0, 1] },
+    };
+    grab.onGrabStart(context, holder);
+    expect(t.holdStarts).toBe(1);
+    expect(t.held).toBe(true);
+    // Two frames of carry at 1/60 s: 1.2 m/s up. The source's own reported
+    // velocity is NOT the rule: the object's motion is.
+    grab.update(context, { ...holder, gripPose: { position: [0, 1.02, -0.4], quaternion: [0, 0, 0, 1] } });
+    grab.update(context, { ...holder, gripPose: { position: [0, 1.04, -0.4], quaternion: [0, 0, 0, 1] } });
+    const released: InteractorInfo = {
+      ...holder,
+      gripPose: { position: [0, 1.04, -0.4], quaternion: [0, 0, 0, 1] },
+      linearVelocity: [1, 2, 3],
+      angularVelocity: [0, 0.5, 0],
+    };
+    grab.onGrabEnd(context, released);
+    expect(t.held).toBe(false);
+    expect(t.releases).toHaveLength(1);
+    expect(t.releases[0]!.linearVelocity[1]).toBeCloseTo(1.2, 6);
+    expect(t.releases[0]!.linearVelocity[0]).toBeCloseTo(0, 6);
+    expect(t.releases[0]!.angularVelocity).toEqual([0, 0, 0]);
+  });
+
+  it("a hold that never moved, or was released the frame it started, throws nothing", () => {
+    const grab = new GrabBehaviour({}, "poseOnly");
+    const t = new FakeTransform();
+    const { context } = ctx(t);
+    const holder: InteractorInfo = { ...interactor, gripPose: { position: [0, 1, -0.4], quaternion: [0, 0, 0, 1] } };
+    grab.onGrabStart(context, holder);
+    grab.onGrabEnd(context, { ...holder, linearVelocity: [5, 5, 5] });
+    expect(t.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+    // No grip at all: nothing recorded, still zeros.
+    grab.onGrabStart(context, interactor);
+    grab.onGrabEnd(context, interactor);
+    expect(t.releases[1]).toEqual({ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] });
+  });
+
+  it("releases with zero velocity when the interactor carries none - a synthesized release", () => {
+    const grab = new GrabBehaviour({}, "poseOnly");
+    const t = new FakeTransform();
+    const { context } = ctx(t);
+    const holder: InteractorInfo = {
+      ...interactor,
+      gripPose: { position: [0, 1, -0.4], quaternion: [0, 0, 0, 1] },
+    };
+    grab.onGrabStart(context, holder);
+    // A synthesized release (source lost / target unregistered / runtime
+    // disposed) hands the behaviour an InteractorInfo with no velocity.
+    grab.update(context, { ...holder, gripPose: { position: [0, 1.5, -0.4], quaternion: [0, 0, 0, 1] } });
+    grab.onGrabEnd(context, { id: holder.id, kind: "other", select: 0, squeeze: 0, synthesized: true });
+    expect(t.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+  });
+
+  it("native fulfilment never writes the transform, and never suspends or resumes physics", () => {
     const grab = new GrabBehaviour({}, "native");
     const t = new FakeTransform();
     const { context } = ctx(t);
@@ -170,6 +229,9 @@ describe("GrabBehaviour (poseOnly)", () => {
     grab.onGrabStart(context, holder);
     grab.update(context, holder);
     expect(t.worldPose).toBeNull();
+    expect(t.holdStarts).toBe(0);
+    grab.onGrabEnd(context, holder);
+    expect(t.releases).toHaveLength(0);
   });
 });
 
@@ -210,5 +272,36 @@ describe("hinge with a rotated mount", () => {
     hinge.onGrabStart(context, holder);
     hinge.update(context, holder);
     expect(hinge.getValue()).toBeCloseTo(0.5, 5);
+  });
+});
+
+describe("hinge, dial and slide measure from the rest pose", () => {
+  // A live pose far from rest and turned, as it is while a behaviour drives
+  // the object. A behaviour that read it would chase its own output.
+  const moved: PoseTuple = { position: [5, -3, 2], quaternion: quatFromAxisAngle([0, 0, 1], Math.PI / 3) };
+
+  function valueAfter(
+    make: () => HingeBehaviour | DialBehaviour | SlideBehaviour,
+    live: PoseTuple | null,
+    start: InteractorInfo,
+    next: InteractorInfo,
+  ): number {
+    const behaviour = make();
+    const t = new FakeTransform();
+    t.worldPose = live;
+    const { context } = ctx(t);
+    behaviour.onGrabStart(context, start);
+    behaviour.update(context, next);
+    return behaviour.getValue();
+  }
+
+  it.each([
+    ["hinge", () => new HingeBehaviour({ axis: [1, 0, 0], restDir: [0, 1, 0] }), [0, 0.7, 0.7]],
+    ["dial", () => new DialBehaviour({ axis: [0, 1, 0], maxAngle: Math.PI }), [0, 0, -1]],
+    ["slide", () => new SlideBehaviour({ axis: [0, 1, 0], travel: 0.3 }), [0, -0.15, 0]],
+  ] as const)("%s ignores where the live pose has moved", (_name, make, tip) => {
+    const start: InteractorInfo = { ...interactor, indexTip: [1, 0, 0] };
+    const next: InteractorInfo = { ...interactor, indexTip: [...tip] };
+    expect(valueAfter(make, moved, start, next)).toBeCloseTo(valueAfter(make, null, start, next), 6);
   });
 });

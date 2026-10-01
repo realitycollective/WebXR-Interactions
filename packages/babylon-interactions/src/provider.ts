@@ -11,20 +11,28 @@
  *
  * Capabilities are derived from the LIVE session, never from the requested
  * configuration, and are re-published on session start, session end and
- * controller add/remove.
+ * controller add/remove. `sample()` reports no sources at all while the
+ * session exists but is not `"visible"`, the same rule IWSDK's provider
+ * applies.
  */
 import {
+  EyeGazeInput,
   NO_CAPABILITIES,
+  rayPoseFromRay,
+  type EyeGazeFrame,
+  type EyeGazeOptions,
   type Handedness,
   type HeadPose,
   type InputCapabilities,
   type InputProvider,
   type InputSourceSnapshot,
+  type PoseTuple,
   type PresenceModality,
   type Unsubscribe,
   type Vec3Tuple,
 } from "@realitycollective/webxr-input";
 import {
+  EYE_TRACKING_FEATURE,
   HAND_TRACKING_FEATURE,
   INDEX_TIP_JOINT,
   POINTER_EVENT_TYPES,
@@ -34,6 +42,7 @@ import {
   toQuat,
   toVec3,
   type BabylonCameraLike,
+  type BabylonEyeTrackingLike,
   type BabylonHandTrackingLike,
   type BabylonPointerInfoLike,
   type BabylonSceneLike,
@@ -62,7 +71,15 @@ export interface BabylonProviderOptions {
    * camera and a mouse drag reports camera motion only.
    */
   desktopGripDistance?: number;
+  /**
+   * Tuning for the eye-gaze rule this provider applies (the filter, the
+   * tracking-loss grace). Defaults are IWSDK 1.0.0's (`EYE_GAZE_DEFAULTS`).
+   */
+  eyeGaze?: EyeGazeOptions;
 }
+
+/** The seconds a sample integrates over until the host reports the real delta. */
+const DEFAULT_FRAME_SECONDS = 1 / 60;
 
 /** Trigger, then the main component, then nothing. */
 const TRIGGER_COMPONENT = "trigger";
@@ -96,9 +113,12 @@ export class BabylonInputProvider implements InputProvider {
   private readonly rightHanded: boolean;
 
   private readonly pointer: PointerState = { down: false, x: 0, y: 0, ray: null };
+  private readonly eyeGaze: EyeGazeInput;
+  private frameSeconds = DEFAULT_FRAME_SECONDS;
 
   constructor(options: BabylonProviderOptions) {
     this.options = options;
+    this.eyeGaze = new EyeGazeInput(options.eyeGaze);
     this.gripDistance = options.desktopGripDistance ?? 1;
     this.rightHanded = options.scene.useRightHandedSystem === true;
     this.capabilities = { ...NO_CAPABILITIES, headPose: true, gaze: true };
@@ -190,6 +210,25 @@ export class BabylonInputProvider implements InputProvider {
       : null;
   }
 
+  /**
+   * The eye-tracking feature (`WebXREyeTracking`, `"xr-eye-tracking"`), when
+   * the app enabled it. Its presence in a live session is the gaze source:
+   * IWSDK's `findGazeSource` finding a `targetRayMode === "gaze"` source.
+   */
+  private eyeTracking(): BabylonEyeTrackingLike | null {
+    const manager = this.options.xr?.baseExperience?.featuresManager;
+    if (!manager) return null;
+    const feature = manager.getEnabledFeature(EYE_TRACKING_FEATURE);
+    if (!feature || typeof feature !== "object") return null;
+    const candidate = feature as Partial<BabylonEyeTrackingLike>;
+    return typeof candidate.getEyeGaze === "function" ? (feature as BabylonEyeTrackingLike) : null;
+  }
+
+  /** The seconds the next `sample()` integrates over (the eye-gaze filter and grace); the host sets it each frame. */
+  setFrameDelta(seconds: number): void {
+    this.frameSeconds = seconds;
+  }
+
   private handFor(controller: BabylonXRControllerLike): BabylonXRHandLike | null {
     return this.handTracking()?.getHandByControllerId(controller.uniqueId) ?? null;
   }
@@ -214,6 +253,7 @@ export class BabylonInputProvider implements InputProvider {
       presence: false,
     };
     if (inSession) {
+      next.eyeGaze = this.eyeTracking() !== null;
       for (const controller of this.controllers()) {
         if (controller.pointer) next.rays = true;
         if (controller.grip ?? controller.pointer) next.grabs = "poseOnly";
@@ -256,13 +296,26 @@ export class BabylonInputProvider implements InputProvider {
 
   sample(): readonly InputSourceSnapshot[] {
     this.sampled.clear();
-    if (this.session() === null) {
+    const session = this.session();
+    if (session === null) {
       // A session that ended between frames leaves stale capabilities behind.
       if (this.capabilities.rays) this.refreshCapabilities();
+      this.eyeGaze.reset();
       return this.samplePointer();
+    }
+    // A session that exists but is not visible (backgrounded, or the
+    // browser's own "content is obscured" state) reports no sources at all,
+    // the same rule IWSDK's provider applies to `world.visibilityState`.
+    // Babylon's session manager passes the raw `XRSession` through, so its
+    // standard `visibilityState` is read straight off it.
+    const visibilityState = (session as { visibilityState?: string }).visibilityState;
+    if (visibilityState !== undefined && visibilityState !== "visible") {
+      this.eyeGaze.reset();
+      return [];
     }
 
     const snapshots: InputSourceSnapshot[] = [];
+    const rayPoses: EyeGazeFrame["rayPoses"] = {};
     for (const controller of this.controllers()) {
       const handedness = normalizeHandedness(controller.inputSource.handedness);
       const hand = this.handFor(controller);
@@ -285,6 +338,9 @@ export class BabylonInputProvider implements InputProvider {
           origin: toVec3(pointerNode.getAbsolutePosition()) ?? [0, 0, 0],
           direction: nodeForward(pointerNode, this.rightHanded),
         };
+        // The selector pose is built from the ray (world up): the ray
+        // convention is -Z forward whatever the scene's handedness.
+        if (handedness !== "none" && !rayPoses[handedness]) rayPoses[handedness] = rayPoseFromRay(snapshot.ray);
       }
       // Babylon exposes the grip node only for a controller with one; a hand,
       // and a controller without a grip space, carry on the pointer node.
@@ -292,6 +348,9 @@ export class BabylonInputProvider implements InputProvider {
       if (gripNode) snapshot.gripPose = nodeWorldPose(gripNode);
       const tip = jointPosition(hand, INDEX_TIP_JOINT);
       if (tip) snapshot.indexTip = tip;
+      // A controller has no fingertip: its index tip is its ray origin, as
+      // IWSDK's input rig makes it, so a controller pokes as a finger does.
+      else if (!controller.inputSource.hand && snapshot.ray) snapshot.indexTip = [...snapshot.ray.origin];
       if ((controller.inputSource.gamepad?.hapticActuators?.length ?? 0) > 0) {
         snapshot.hapticsAvailable = true;
       }
@@ -300,7 +359,16 @@ export class BabylonInputProvider implements InputProvider {
       snapshots.push(snapshot);
       this.sampled.set(snapshot.id, { handedness, controller });
     }
-    return snapshots;
+    if (!this.capabilities.eyeGaze) return snapshots;
+    const eye = this.eyeTracking();
+    let pose: PoseTuple | null = null;
+    const gaze = eye && eye.isEyeGazeValid !== false ? eye.getEyeGaze() : null;
+    if (gaze) {
+      const origin = toVec3(gaze.origin);
+      const direction = toVec3(gaze.direction);
+      if (origin && direction) pose = rayPoseFromRay({ origin, direction });
+    }
+    return this.eyeGaze.update({ present: eye !== null, pose, rayPoses }, snapshots, this.frameSeconds);
   }
 
   /**
@@ -415,6 +483,7 @@ export class BabylonInputProvider implements InputProvider {
   }
 
   dispose(): void {
+    this.eyeGaze.reset();
     for (const off of this.detach.splice(0)) off();
     this.sampled.clear();
     this.capsListeners.clear();

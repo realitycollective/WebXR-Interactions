@@ -13,7 +13,7 @@
     "@types/three": "0.181.0"
   },
   "scripts": {
-    "build": "npm --workspace @realitycollective/webxr-interactions run build && npm --workspace @realitycollective/threejs-interactions run build && npm --workspace @realitycollective/babylon-interactions run build && npm --workspace @realitycollective/iwsdk-interactions run build && npm --workspace @realitycollective/xrblocks-interactions run build",
+    "build": "npm --workspace @realitycollective/webxr-interactions run build && npm --workspace @realitycollective/threejs-interactions run build && npm --workspace @realitycollective/babylon-interactions run build && npm --workspace @realitycollective/iwsdk-interactions run build && npm --workspace @realitycollective/xrblocks-interactions run build && npm --workspace @realitycollective/native-interactions run build",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
@@ -22,13 +22,18 @@
     "build:playground": "npm run build && npm --workspace playground-demo run build",
     "build:demos": "npm run build:playground",
     "dev:playground": "npm run dev -w playground-demo",
-    "smoke": "node scripts/smoke-deploy.mjs"
+    "smoke": "node scripts/smoke-deploy.mjs",
+    "harness:scene": "node harness/native/scripts/write-scene.mjs",
+    "harness:compile": "tsc -p harness/native/tsconfig.json --noEmit && node harness/native/compile.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
+    "@dimforge/rapier3d-compat": "^0.21.0",
     "@types/node": "^22.20.1",
     "@types/three": "0.181.0",
     "@vitest/coverage-v8": "^4.1.8",
+    "esbuild": "^0.28.2",
+    "hermes-compiler": "^250829098.0.19",
     "playwright-core": "^1.61.1",
     "publint": "^0.3.24",
     "three": "npm:super-three@0.181.0",

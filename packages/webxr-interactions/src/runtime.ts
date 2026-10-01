@@ -14,16 +14,31 @@
  * negotiation announce themselves with a `behaviourDisabled` event.
  */
 import {
+  PointerArbiter,
+  PointerDisplay,
   SELECT_PRESS_THRESHOLD,
   SELECT_RELEASE_THRESHOLD,
+  pointerVisualsFor,
+  rayPoseFromRay,
+  resolveEyeGazeOptions,
   unmetRequirements,
+  type ActivePointerKind,
+  type EyeGazeOptions,
   type InputCapabilities,
   type InputHitHint,
   type InputProvider,
   type InputSourceSnapshot,
+  type PointerCandidate,
+  type PointerDisplayConfig,
+  type PointerDrawing,
+  type PointerOffer,
+  type PointerTargetSet,
+  type PointerVisuals,
   type PoseTuple,
+  type QuatTuple,
   type RayTuple,
   type Unsubscribe,
+  type Vec3Tuple,
 } from "@realitycollective/webxr-input";
 import type { Behaviour, InteractorInfo } from "./behaviours/behaviour.js";
 import {
@@ -35,12 +50,11 @@ import { GrabBehaviour } from "./behaviours/grab.js";
 import type { InteractableDescriptor } from "./descriptor.js";
 import { Emitter, type InteractionEvent, type InteractionEventListener } from "./events.js";
 import type { FeedbackIntent, FeedbackListener } from "./feedback.js";
-import { DwellState, resolveDwellConfig, DWELL_DEFAULTS, type DwellConfig } from "./gaze.js";
-import { vApplyQuat } from "./math.js";
-import type { HitTester, TransformPort } from "./ports.js";
+import { DwellState, GazeConsensus, resolveDwellConfig, DWELL_DEFAULTS, type DwellConfig } from "./gaze.js";
+import { quatConjugate, quatMultiply, vApplyQuat, vLength, vNormalize, vSub } from "./math.js";
+import type { HitTester, InteractableHit, TransformPort } from "./ports.js";
+import { resolveNearPointerOptions, TouchPointerState, type NearPointerOptions } from "./near-pointer.js";
 import { VelocityTracker, type VelocityTrackerOptions } from "./velocity-tracker.js";
-
-const DEFAULT_POKE_RADIUS = 0.05;
 /** Interactor id used when gaze is synthesized from the head pose. */
 export const HEAD_GAZE_INTERACTOR_ID = "head-gaze";
 
@@ -69,6 +83,7 @@ interface Registered {
   behaviours: BehaviourSlot[];
   transform: TransformPort | undefined;
   enabled: boolean;
+  /** The touch hover ENTER distance for this target (`InteractableDescriptor.pokeRadius`, else the near-pointer default). */
   pokeRadius: number;
   gazeRequired: boolean;
   dwellConfig: Required<DwellConfig> | null;
@@ -79,12 +94,31 @@ interface Registered {
   grabbedBy: string | null;
 }
 
+/** How a source's target was found this frame; `"poke"` and `"grab"` mark a near pointer, which suppresses eye gaze. */
+type ResolvedBy = "hint" | "poke" | "grab" | "ray" | "gaze" | null;
+
 interface SourceRuntimeState {
   hoverTarget: string | null;
+  resolvedBy: ResolvedBy;
   pressed: boolean;
   pressTarget: string | null;
   grabbed: boolean;
   grabTarget: string | null;
+  /** The pointer owning this source this frame (the arbiter's decision). */
+  active: ActivePointerKind | null;
+  /** The active pointer's candidate, where the cursor sits: this runtime's, or another target set's (a panel). */
+  candidate: PointerOffer | null;
+  /** The touch pointer's hover and press machine. */
+  touch: TouchPointerState;
+}
+
+/** A gaze selection in progress: the pointer the pinching hand took over (see `followHand`). */
+interface GazeHold {
+  sourceId: string;
+  /** The gaze ray at the moment of selection, used while the hand cannot follow. */
+  ray: RayTuple;
+  /** The aimed ray's orientation relative to the hand's ray space, or null when the pointer stays put. */
+  relative: QuatTuple | null;
 }
 
 export interface InteractionRuntimeOptions {
@@ -92,12 +126,43 @@ export interface InteractionRuntimeOptions {
   hitTester?: HitTester;
   dwellDefaults?: DwellConfig;
   /**
+   * Eye-gaze targeting, when the provider reports `capabilities.eyeGaze`:
+   * the selection cone, dwell window, near-pointer suppression and whether a
+   * gaze-started drag follows the pinching hand. Defaults are IWSDK 1.0.0's
+   * (`EYE_GAZE_DEFAULTS`).
+   */
+  eyeGaze?: EyeGazeOptions;
+  /**
    * Per-source velocity tracking. On by default with no smoothing; pass
    * `false` to skip it, or options to smooth. The tracker only fills in
    * what the provider did not supply.
    */
   velocity?: VelocityTrackerOptions | false;
+  /**
+   * The near-pointer rule's distances: touch hover enter and exit, touch
+   * press, grip grab radius. Defaults are IWSDK 1.0.0's
+   * (`NEAR_POINTER_DEFAULTS`). An interactable's own `pokeRadius` overrides
+   * the touch hover enter distance for that target alone.
+   */
+  nearPointer?: Partial<NearPointerOptions>;
+  /**
+   * The pointer arbiter shared with everything else a pointer can reach (the
+   * UI Extensions window hosts), so one decision per source covers panels
+   * and interactables alike, as IWSDK's `MultiPointer` does. Omit for a
+   * runtime used on its own: it makes one, and decides over its own targets.
+   */
+  pointers?: PointerArbiter;
+  /**
+   * The app's pointer display settings (ray never, always or while hitting;
+   * cursors on objects and on panels; the ray and cursor look), or a
+   * `PointerDisplay` to share. Defaults are IWSDK 1.0.0's. Settable at run
+   * time through `getPointerDisplay().set(...)`.
+   */
+  pointerDisplay?: PointerDisplay | Partial<PointerDisplayConfig>;
 }
+
+/** The target set this runtime registers with its arbiter. */
+export const INTERACTIONS_POINTER_SET = "interactions";
 
 export interface RegisterPorts {
   transform?: TransformPort;
@@ -113,15 +178,37 @@ export class InteractionRuntime {
   private readonly events = new Emitter<InteractionEvent>();
   private readonly feedbackEmitter = new Emitter<FeedbackIntent>();
   private readonly afterSample = new Emitter<readonly InputSourceSnapshot[]>();
+  private readonly visualsEmitter = new Emitter<readonly PointerVisuals[]>();
+  private readonly drawingEmitter = new Emitter<readonly PointerDrawing[]>();
+  private readonly nearPointer: NearPointerOptions;
+  private readonly pointers: PointerArbiter;
+  private readonly targetSet: PointerTargetSet;
+  private readonly pointerDisplay: PointerDisplay;
+  private lastVisuals: PointerVisuals[] = [];
+  private lastDrawings: PointerDrawing[] = [];
   private readonly velocityTracker: VelocityTracker | null;
   private lastSources = new Map<string, InputSourceSnapshot>();
   private capabilities: InputCapabilities;
   private readonly unsubscribeCaps: Unsubscribe;
   private disposed = false;
+  private readonly eyeGaze: Required<EyeGazeOptions>;
+  private readonly gazeConsensus: GazeConsensus;
+  /** The eye-gaze source's target this frame: cone, consensus and suppression applied. */
+  private eyeGazeTarget: string | null = null;
+  /** Where the eye-gaze ray last aimed at each target, for the pinching hand to aim at. */
+  private readonly gazePoints = new Map<string, Vec3Tuple>();
+  private gazeHold: GazeHold | null = null;
 
   constructor(options: InteractionRuntimeOptions) {
     this.provider = options.provider;
     this.hitTester = options.hitTester ?? null;
+    this.nearPointer = resolveNearPointerOptions(options.nearPointer);
+    this.pointers = options.pointers ?? new PointerArbiter();
+    this.targetSet = this.pointers.registerSet(INTERACTIONS_POINTER_SET, "object");
+    this.pointerDisplay =
+      options.pointerDisplay instanceof PointerDisplay ? options.pointerDisplay : new PointerDisplay(options.pointerDisplay);
+    this.eyeGaze = resolveEyeGazeOptions(options.eyeGaze);
+    this.gazeConsensus = new GazeConsensus(this.eyeGaze.dwellWindowSeconds);
     const d = options.dwellDefaults;
     this.dwellDefaults = {
       holdSeconds: d?.holdSeconds ?? DWELL_DEFAULTS.holdSeconds,
@@ -156,7 +243,7 @@ export class InteractionRuntime {
       })),
       transform: ports.transform,
       enabled: def.enabled !== false,
-      pokeRadius: def.pokeRadius ?? DEFAULT_POKE_RADIUS,
+      pokeRadius: def.pokeRadius ?? this.nearPointer.touchHoverEnter,
       gazeRequired: def.gaze?.required === true,
       dwellConfig: resolveDwellConfig(def.gaze?.dwell, this.dwellDefaults),
       dwell: new DwellState(),
@@ -272,12 +359,76 @@ export class InteractionRuntime {
     return this.provider;
   }
 
+  /** The near-pointer distances in force (the defaults, or the options given). */
+  getNearPointerOptions(): Readonly<NearPointerOptions> {
+    return this.nearPointer;
+  }
+
+  /**
+   * The pointer that owns a source this frame: `"touch"`, `"grab"`, `"ray"`
+   * or `"gaze"`, or null when no pointer has a candidate (or the source is
+   * unknown). Decided by the core rule in `near-pointer.ts`, on every
+   * platform; a provider hint names the target but never the pointer.
+   */
+  getActivePointer(sourceId: string): ActivePointerKind | null {
+    return this.sourceStates.get(sourceId)?.active ?? null;
+  }
+
+  /**
+   * What to draw for every source this frame: the ray only while the ray is
+   * the active pointer or nothing is, the cursor at the active pointer's
+   * candidate. Published once per `update`, after the sources; a binding
+   * applies it to its ray and cursor visuals, and a native binding hands it
+   * to the host as `applyPointerVisuals`. The list and its entries are fresh
+   * each frame and never written to again.
+   */
+  onPointerVisuals(listener: (visuals: readonly PointerVisuals[]) => void): Unsubscribe {
+    return this.visualsEmitter.subscribe(listener);
+  }
+
+  /** The visuals last published for a source, or undefined before its first frame. */
+  getPointerVisuals(sourceId: string): PointerVisuals | undefined {
+    return this.lastVisuals.find((visuals) => visuals.sourceId === sourceId);
+  }
+
+  /**
+   * What to draw for every source this frame under the app's pointer display
+   * settings: the visuals above resolved through `pointerDrawing`. Published
+   * right after `onPointerVisuals`. A binding that draws its own ray and
+   * cursor applies exactly this; a native binding hands it to the host.
+   */
+  onPointerDrawing(listener: (drawings: readonly PointerDrawing[]) => void): Unsubscribe {
+    return this.drawingEmitter.subscribe(listener);
+  }
+
+  /** The drawing last published for a source, or undefined before its first frame. */
+  getPointerDrawing(sourceId: string): PointerDrawing | undefined {
+    return this.lastDrawings.find((drawing) => drawing.sourceId === sourceId);
+  }
+
+  /** The arbiter deciding which pointer owns each source, shared with the UI Extensions hosts when the app passed one. */
+  getPointerArbiter(): PointerArbiter {
+    return this.pointers;
+  }
+
+  /** The app's pointer display settings; `set` changes them at run time. */
+  getPointerDisplay(): PointerDisplay {
+    return this.pointerDisplay;
+  }
+
+  /** Whether a source is pressing or grabbing this frame (the selection that recolours its pointer). */
+  isSelecting(sourceId: string): boolean {
+    const state = this.sourceStates.get(sourceId);
+    return state !== undefined && (state.pressTarget !== null || state.grabTarget !== null);
+  }
+
   // -- frame ------------------------------------------------------------------
 
   update(dt: number): void {
     if (this.disposed) return;
     const sampled = this.provider.sample();
-    const sources = this.velocityTracker ? this.velocityTracker.update(sampled, dt) : sampled;
+    const tracked = this.velocityTracker ? this.velocityTracker.update(sampled, dt) : sampled;
+    const sources = this.followHand(tracked);
     const hints = this.provider.sampleHints?.() ?? [];
     this.lastSources = new Map(sources.map((source) => [source.id, source]));
     this.afterSample.emit(sources);
@@ -289,30 +440,173 @@ export class InteractionRuntime {
       else hintBySource.set(hint.sourceId, [hint]);
     }
 
+    // With eye gaze live, the hands and controllers go first: whether one of
+    // them has a near pointer active this frame decides what gaze may target
+    // (IWSDK reads the hand pointers' state before it drives the gaze pointer).
+    const eyeGazeLive = this.capabilities.eyeGaze;
+    const ordered = eyeGazeLive
+      ? [...sources].sort((a, b) => Number(a.kind === "gaze") - Number(b.kind === "gaze"))
+      : sources;
+    this.eyeGazeTarget = null;
+    let sawGaze = false;
     const seen = new Set<string>();
-    for (const source of sources) {
+    const visuals: PointerVisuals[] = [];
+    for (const source of ordered) {
       seen.add(source.id);
+      if (eyeGazeLive && source.kind === "gaze") {
+        sawGaze = true;
+        this.resolveEyeGaze(source, dt);
+      }
       this.updateSource(source, hintBySource.get(source.id) ?? []);
+      const state = this.sourceState(source.id);
+      visuals.push(pointerVisualsFor(source.id, source.ray !== undefined, state.active, state.candidate));
+    }
+    if (!sawGaze) {
+      // No eye-gaze source this frame (none, or far targeting handed back).
+      this.gazeHold = null;
+      this.gazeConsensus.reset();
     }
     // Sources that vanished mid-hold release everything they held.
     for (const [id, state] of this.sourceStates) {
       if (!seen.has(id)) {
         this.forceRelease(id, state);
         this.sourceStates.delete(id);
+        this.pointers.forget(id);
       }
     }
 
     this.updateGaze(sources, dt);
     this.tickBehaviours(sources, dt);
+    this.lastVisuals = visuals;
+    this.visualsEmitter.emit(visuals);
+    const drawings = visuals.map((entry) => this.pointerDisplay.drawing(entry, this.isSelecting(entry.sourceId)));
+    this.lastDrawings = drawings;
+    this.drawingEmitter.emit(drawings);
   }
 
   dispose(): void {
+    this.targetSet.dispose();
+    if (this.disposed) return;
     this.disposed = true;
+    // A disposed runtime still owes every held grab exactly one `endHold`
+    // (zero velocity - nothing threw it away, the scene just went down),
+    // so physics never stays suspended once nothing is left to resume it.
+    for (const [id, registered] of this.interactables) {
+      if (registered.grabbedBy) {
+        this.endGrab(id, registered.grabbedBy, {
+          id: registered.grabbedBy,
+          kind: "other",
+          select: 0,
+          squeeze: 0,
+        });
+      }
+    }
     this.unsubscribeCaps();
     this.interactables.clear();
     this.sourceStates.clear();
     this.lastSources.clear();
     this.velocityTracker?.reset();
+    this.gazeHold = null;
+    this.gazePoints.clear();
+    this.gazeConsensus.reset();
+    this.lastVisuals = [];
+  }
+
+  // -- eye gaze -----------------------------------------------------------------
+
+  /**
+   * The targeting half of the eye-gaze rule (`@realitycollective/webxr-input`
+   * `eye-gaze.ts` states the whole of it): the cone's best candidate this
+   * frame, then the dwell consensus over the window, and nothing at all while
+   * a hand's near pointer is hovering or selecting (IWSDK
+   * `suppressWhenDirectPointerActive`). A frame with no valid gaze ray clears
+   * the record, as IWSDK resets its conecaster, unless a selection is held.
+   */
+  private resolveEyeGaze(source: InputSourceSnapshot, dt: number): void {
+    const ray = source.ray;
+    if (!ray) {
+      if (!this.gazeHold) this.gazeConsensus.reset();
+      this.eyeGazeTarget = null;
+      return;
+    }
+    if (this.eyeGaze.suppressWhenDirectPointerActive && this.directPointerActive()) {
+      this.gazeConsensus.skip(dt);
+      this.eyeGazeTarget = null;
+      return;
+    }
+    const halfAngle = (this.eyeGaze.coneAngleDegrees * Math.PI) / 180;
+    const maxLength = this.eyeGaze.maxRayLength;
+    let best: InteractableHit | null = null;
+    if (this.hitTester) {
+      best = this.hitTester.hitCone
+        ? this.hitTester.hitCone(ray, halfAngle, maxLength)
+        : this.hitTester.hitRay(ray);
+      if (best && (best.distance > maxLength || !this.targetable(best.interactableId))) best = null;
+    }
+    if (best) this.gazePoints.set(best.interactableId, best.point);
+    this.eyeGazeTarget = this.gazeConsensus.update(best?.interactableId ?? null, dt, (id) => this.targetable(id));
+  }
+
+  /** A hand's near pointer is hovering or selecting: touch or grab owns the hand, or a grab is held. */
+  private directPointerActive(): boolean {
+    for (const [id, state] of this.sourceStates) {
+      const source = this.lastSources.get(id);
+      if (!source || (source.handedness !== "left" && source.handedness !== "right")) continue;
+      if (state.grabbed) return true;
+      if ((state.active === "touch" || state.active === "grab") && (state.hoverTarget !== null || state.pressTarget !== null)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Once a gaze selection is held, the pinching hand drives the pointer
+   * (IWSDK `pointerTransformFollowsHand`): the frame the hold starts, a ray
+   * from the hand's ray space is aimed at the gaze hit and its orientation
+   * relative to the hand recorded; every later frame the gaze snapshot's ray
+   * is that hand's ray space turned by the same amount. When the hand could
+   * not reach the hit, or the option is off, the ray stays where the
+   * selection was made. Consumers of `onSample` and `getSource`, and every
+   * behaviour, see the followed ray.
+   */
+  private followHand(sources: readonly InputSourceSnapshot[]): readonly InputSourceSnapshot[] {
+    const hold = this.gazeHold;
+    if (!hold || !this.capabilities.eyeGaze) return sources;
+    const index = sources.findIndex((source) => source.id === hold.sourceId);
+    if (index < 0) return sources;
+    const source = sources[index]!;
+    let ray = hold.ray;
+    if (hold.relative && source.selectorPose) {
+      const quaternion = quatMultiply(source.selectorPose.quaternion, hold.relative);
+      ray = { origin: [...source.selectorPose.position], direction: vApplyQuat([0, 0, -1], quaternion) };
+    }
+    const out = [...sources];
+    out[index] = { ...source, ray };
+    return out;
+  }
+
+  /** Start, keep or end the gaze hold from the gaze source's press and grab state this frame. */
+  private trackGazeHold(source: InputSourceSnapshot, state: SourceRuntimeState, target: string | null): void {
+    if (!state.pressed && !state.grabbed) {
+      this.gazeHold = null;
+      return;
+    }
+    if (this.gazeHold?.sourceId === source.id) return;
+    if (!source.ray) return;
+    let relative: QuatTuple | null = null;
+    const point = target ? this.gazePoints.get(target) : undefined;
+    const selector = source.selectorPose;
+    if (this.eyeGaze.pointerTransformFollowsHand && selector && point) {
+      const aim = vSub(point, selector.position);
+      if (vLength(aim) > 1e-6) {
+        const up = vApplyQuat([0, 1, 0], selector.quaternion);
+        const aimed = rayPoseFromRay({ origin: selector.position, direction: vNormalize(aim) }, up);
+        const aimedRay: RayTuple = { origin: aimed.position, direction: vApplyQuat([0, 0, -1], aimed.quaternion) };
+        // IWSDK follows the hand only when the ray from the hand reaches the target.
+        const reaches = this.hitTester ? this.hitTester.hitRay(aimedRay) !== null : true;
+        if (reaches) relative = quatMultiply(quatConjugate(selector.quaternion), aimed.quaternion);
+      }
+    }
+    this.gazeHold = { sourceId: source.id, ray: source.ray, relative };
   }
 
   // -- internals ---------------------------------------------------------------
@@ -320,7 +614,17 @@ export class InteractionRuntime {
   private sourceState(id: string): SourceRuntimeState {
     let state = this.sourceStates.get(id);
     if (!state) {
-      state = { hoverTarget: null, pressed: false, pressTarget: null, grabbed: false, grabTarget: null };
+      state = {
+        hoverTarget: null,
+        resolvedBy: null,
+        pressed: false,
+        pressTarget: null,
+        grabbed: false,
+        grabTarget: null,
+        active: null,
+        candidate: null,
+        touch: new TouchPointerState(),
+      };
       this.sourceStates.set(id, state);
     }
     return state;
@@ -336,30 +640,119 @@ export class InteractionRuntime {
     if (source.ray) info.ray = source.ray;
     if (source.gripPose) info.gripPose = source.gripPose;
     if (source.indexTip) info.indexTip = source.indexTip;
+    if (source.linearVelocity) info.linearVelocity = source.linearVelocity;
+    if (source.angularVelocity) info.angularVelocity = source.angularVelocity;
     return info;
   }
 
-  /** Resolve this source's target: hints beat poke beats ray. */
-  private resolveTarget(source: InputSourceSnapshot, hints: InputHitHint[]): string | null {
+  /**
+   * Resolve this source's target and its active pointer. The pointer is the
+   * core rule (`near-pointer.ts`): touch, then grab, then ray, the first with
+   * a candidate, locked while it presses or grabs. The target is a provider
+   * hint when there is one (provider power: IWSDK's mesh-accurate tags), else
+   * the active pointer's candidate. An eye-gaze source targets through the
+   * cone and consensus instead.
+   */
+  private resolveTarget(source: InputSourceSnapshot, hints: InputHitHint[], state: SourceRuntimeState): string | null {
+    state.resolvedBy = null;
     const hint =
       hints.find((h) => h.state === "grab") ??
       hints.find((h) => h.state === "press") ??
       hints.find((h) => h.state === "hover");
-    if (hint && this.targetable(hint.targetId)) return hint.targetId;
-    if (source.indexTip && this.hitTester) {
-      const poke = this.hitTester.hitProximity(source.indexTip, DEFAULT_POKE_RADIUS);
-      if (poke && this.targetable(poke.interactableId)) return poke.interactableId;
+    if (this.capabilities.eyeGaze && source.kind === "gaze") {
+      state.active = "gaze";
+      state.touch.reset();
+      const gazeTarget = this.eyeGazeTarget;
+      const point = gazeTarget ? this.gazePoints.get(gazeTarget) : undefined;
+      state.candidate =
+        gazeTarget && point ? { targetId: gazeTarget, point, distance: 0, set: this.targetSet.id, targetKind: "object" } : null;
+      this.pointers.setDecision({ sourceId: source.id, active: "gaze", candidate: state.candidate });
+      if (hint && this.targetable(hint.targetId)) {
+        state.resolvedBy = "hint";
+        return hint.targetId;
+      }
+      if (gazeTarget !== null) state.resolvedBy = "gaze";
+      return gazeTarget;
     }
-    if (source.ray && this.hitTester) {
-      const hit = this.hitTester.hitRay(source.ray);
-      if (hit && this.targetable(hit.interactableId)) return hit.interactableId;
+    // This runtime's own candidates go to the arbiter, which decides across
+    // every target set (a UI panel may be nearer than any interactable). A
+    // hand or controller is also reachable by its side, so a UI host that
+    // knows only the side offers to the same source.
+    if (source.handedness === "left" || source.handedness === "right") this.pointers.alias(source.handedness, source.id);
+    this.targetSet.offer(source.id, "touch", this.touchCandidate(source, state));
+    this.targetSet.offer(source.id, "grab", this.grabCandidate(source));
+    this.targetSet.offer(source.id, "ray", this.rayCandidate(source));
+    const decision = this.pointers.resolve(source.id);
+    state.active = decision.active;
+    state.candidate = decision.candidate;
+    if (hint && this.targetable(hint.targetId)) {
+      state.resolvedBy = "hint";
+      return hint.targetId;
     }
-    return null;
+    const active = decision.active;
+    if (!decision.candidate || !active) return null;
+    // Another set's target (a panel) owns the pointer: no interactable is
+    // targeted, and the visuals still say where the cursor sits.
+    if (decision.candidate.set !== this.targetSet.id) return null;
+    state.resolvedBy = active === "touch" ? "poke" : (active as "grab" | "ray");
+    return decision.candidate.targetId;
+  }
+
+  /**
+   * The touch pointer's candidate this frame, advancing the source's touch
+   * machine: the nearest target within the widest touch band, hovering by
+   * that target's own enter and exit distances. One proximity query at the
+   * largest radius any interactable asked for, then the nearest hit must be
+   * inside ITS OWN band; the trade is that a farther target with a wider
+   * band is not found behind a nearer one with a narrower band.
+   */
+  private touchCandidate(source: InputSourceSnapshot, state: SourceRuntimeState): PointerCandidate | null {
+    const { touchHoverEnter, touchHoverExit, touchDown } = this.nearPointer;
+    const hysteresis = touchHoverExit - touchHoverEnter;
+    if (!source.indexTip || !this.hitTester) {
+      state.touch.update(null, touchHoverEnter, touchHoverExit, touchDown);
+      return null;
+    }
+    const hit = this.hitTester.hitProximity(source.indexTip, this.touchQueryRadius());
+    const registered = hit ? this.interactables.get(hit.interactableId) : undefined;
+    if (!hit || !registered || !registered.enabled) {
+      state.touch.update(null, touchHoverEnter, touchHoverExit, touchDown);
+      return null;
+    }
+    const enter = registered.pokeRadius;
+    const update = state.touch.update(hit.distance, enter, enter + hysteresis, touchDown);
+    return update.hovering ? { targetId: hit.interactableId, point: hit.point, distance: hit.distance } : null;
+  }
+
+  /** The grab pointer's candidate: the nearest target whose surface the grip sphere reaches. */
+  private grabCandidate(source: InputSourceSnapshot): PointerCandidate | null {
+    if (!source.gripPose || !this.hitTester) return null;
+    const hit = this.hitTester.hitProximity(source.gripPose.position, this.nearPointer.grabRadius);
+    if (!hit || !this.targetable(hit.interactableId)) return null;
+    return { targetId: hit.interactableId, point: hit.point, distance: hit.distance };
+  }
+
+  /** The ray pointer's candidate: the nearest target along the ray. */
+  private rayCandidate(source: InputSourceSnapshot): PointerCandidate | null {
+    if (!source.ray || !this.hitTester) return null;
+    const hit = this.hitTester.hitRay(source.ray);
+    if (!hit || !this.targetable(hit.interactableId)) return null;
+    return { targetId: hit.interactableId, point: hit.point, distance: hit.distance };
   }
 
   private targetable(id: string): boolean {
     const registered = this.interactables.get(id);
     return registered !== undefined && registered.enabled;
+  }
+
+  /** The widest touch exit band among enabled interactables; the default exit distance when none is registered. */
+  private touchQueryRadius(): number {
+    const hysteresis = this.nearPointer.touchHoverExit - this.nearPointer.touchHoverEnter;
+    let radius = 0;
+    for (const registered of this.interactables.values()) {
+      if (registered.enabled && registered.pokeRadius > radius) radius = registered.pokeRadius;
+    }
+    return radius > 0 ? radius + hysteresis : this.nearPointer.touchHoverExit;
   }
 
   private flags(registered: Registered): { pressable: boolean; grabbable: boolean } {
@@ -375,7 +768,7 @@ export class InteractionRuntime {
 
   private updateSource(source: InputSourceSnapshot, hints: InputHitHint[]): void {
     const state = this.sourceState(source.id);
-    const target = this.resolveTarget(source, hints);
+    const target = this.resolveTarget(source, hints, state);
 
     // Hover transitions.
     if (state.hoverTarget !== target) {
@@ -396,9 +789,12 @@ export class InteractionRuntime {
 
     const hintPress = hints.some((h) => h.state === "press");
     const hintGrab = hints.some((h) => h.state === "grab") || source.nativeGrabbing === true;
+    // The touch press: the fingertip at or under the press distance while
+    // touch owns the source (`near-pointer.ts`), with no select needed.
+    const touchPress = state.active === "touch" && state.touch.isPressed;
 
-    // Press with hysteresis (hints override).
-    const pressActive = hintPress || (state.pressed
+    // Press with hysteresis (hints and the touch press override).
+    const pressActive = hintPress || touchPress || (state.pressed
       ? pressSignal > SELECT_RELEASE_THRESHOLD
       : pressSignal >= SELECT_PRESS_THRESHOLD);
     if (pressActive && !state.pressed) {
@@ -447,6 +843,15 @@ export class InteractionRuntime {
         state.grabTarget = null;
       }
     }
+
+    // The selection lock: the pointer that owns this source keeps it while
+    // it presses or grabs, whatever appears nearer meanwhile.
+    const selecting = state.pressTarget !== null || state.grabTarget !== null;
+    for (const kind of ["touch", "grab", "ray"] as const) {
+      this.targetSet.setSelecting(source.id, kind, selecting && state.active === kind);
+    }
+
+    if (this.capabilities.eyeGaze && source.kind === "gaze") this.trackGazeHold(source, state, target);
   }
 
   private gazeAllows(registered: Registered): boolean {
@@ -507,21 +912,24 @@ export class InteractionRuntime {
   }
 
   private forceRelease(sourceId: string, state: SourceRuntimeState): void {
-    const info: InteractorInfo = { id: sourceId, kind: "other", select: 0, squeeze: 0 };
+    const info: InteractorInfo = { id: sourceId, kind: "other", select: 0, squeeze: 0, synthesized: true };
     if (state.pressTarget) this.routePressEnd(state.pressTarget, sourceId, info);
     if (state.grabTarget) this.endGrab(state.grabTarget, sourceId, info);
     if (state.hoverTarget) this.setHover(state.hoverTarget, sourceId, false);
+    state.touch.reset();
+    state.active = null;
+    state.candidate = null;
   }
 
   private releaseAllHolds(id: string): void {
     for (const [sourceId, state] of this.sourceStates) {
       if (state.pressTarget === id) {
-        this.routePressEnd(id, sourceId, { id: sourceId, kind: "other", select: 0, squeeze: 0 });
+        this.routePressEnd(id, sourceId, { id: sourceId, kind: "other", select: 0, squeeze: 0, synthesized: true });
         state.pressTarget = null;
         state.pressed = false;
       }
       if (state.grabTarget === id) {
-        this.endGrab(id, sourceId, { id: sourceId, kind: "other", select: 0, squeeze: 0 });
+        this.endGrab(id, sourceId, { id: sourceId, kind: "other", select: 0, squeeze: 0, synthesized: true });
         state.grabTarget = null;
         state.grabbed = false;
       }
@@ -536,7 +944,15 @@ export class InteractionRuntime {
     let gazeRay: RayTuple | null = null;
     let gazeId = HEAD_GAZE_INTERACTOR_ID;
     const gazeSource = sources.find((s) => s.kind === "gaze");
-    if (gazeSource?.ray) {
+    // Eye gaze, when live, is the gaze for gating and dwell too, with the
+    // target the cone and consensus chose (nothing while a near pointer is
+    // active, or while the pose is invalid). Otherwise a head-gaze source, or
+    // the head pose, targets by plain ray as before.
+    const eyeGaze = this.capabilities.eyeGaze && gazeSource !== undefined;
+    if (eyeGaze) {
+      gazeRay = gazeSource.ray ?? null;
+      gazeId = gazeSource.id;
+    } else if (gazeSource?.ray) {
       gazeRay = gazeSource.ray;
       gazeId = gazeSource.id;
     } else if (this.capabilities.headPose && this.provider.getHeadPose) {
@@ -547,8 +963,11 @@ export class InteractionRuntime {
       };
     }
 
-    const gazeTarget =
-      gazeRay && this.hitTester ? this.hitTester.hitRay(gazeRay)?.interactableId ?? null : null;
+    const gazeTarget = eyeGaze
+      ? this.eyeGazeTarget
+      : gazeRay && this.hitTester
+        ? (this.hitTester.hitRay(gazeRay)?.interactableId ?? null)
+        : null;
 
     for (const [id, registered] of this.interactables) {
       const hovered = registered.enabled && gazeTarget === id;

@@ -78,7 +78,7 @@ export class HingeBehaviour implements Behaviour {
     if (holder && ctx.transform) {
       const hand = holderPoint(holder);
       if (hand) {
-        const rest = ctx.transform.getWorldPose();
+        const rest = ctx.transform.getRestWorldPose();
         const local = worldToLocal(hand, rest.position, rest.quaternion);
         const alongRest = vDot(local, this.restDir);
         const alongSwing = vDot(local, this.swingDir);

@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/iwsdk-interactions",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Meta IWSDK adapter for the Reality Collective Interaction Extensions - feeds IWSDK's input machinery (Pressed/Grabbed tags, poke/ray interactables, grabbables, XR gamepads, hand joints) into the engine-free @realitycollective/webxr-interactions core, with native grab fulfilment. Re-exports the core.",
   "keywords": [
     "realitycollective",
@@ -9,7 +9,10 @@
     "xr",
     "interaction",
     "input",
-    "typescript"
+    "typescript",
+    "physics",
+    "pointer",
+    "eye-gaze"
   ],
   "license": "MIT",
   "author": "Reality Collective",
@@ -32,17 +35,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-input": "^0.1.4",
-    "@realitycollective/webxr-interactions": "^0.1.0"
+    "@realitycollective/webxr-input": "^0.1.8",
+    "@realitycollective/webxr-interactions": "^0.1.1"
   },
   "peerDependencies": {
-    "@iwsdk/core": ">=0.5.0 <0.6.0",
-    "@iwsdk/xr-input": ">=0.5.0 <0.6.0",
+    "@iwsdk/core": ">=1.0.0 <2.0.0",
+    "@iwsdk/xr-input": ">=1.0.0 <2.0.0",
     "three": ">=0.170.0"
   },
   "devDependencies": {
-    "@iwsdk/core": "0.5.3",
-    "@iwsdk/xr-input": "0.5.3",
+    "@iwsdk/core": "1.0.0",
+    "@iwsdk/xr-input": "1.0.0",
+    "elics": "3.4.2",
     "three": "npm:super-three@0.181.0",
     "@types/three": "0.181.0"
   },

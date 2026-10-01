@@ -11,7 +11,12 @@ import {
   type RayTuple,
   type Vec3Tuple,
 } from "@realitycollective/webxr-input";
-import type { HitTester, InteractableHit, TransformPort } from "@realitycollective/webxr-interactions";
+import type {
+  HitTester,
+  HoldRelease,
+  InteractableHit,
+  TransformPort,
+} from "@realitycollective/webxr-interactions";
 
 export class FakeProvider implements InputProvider {
   capabilities: InputCapabilities = {
@@ -69,6 +74,29 @@ export class FakeProvider implements InputProvider {
 export class FakeHitTester implements HitTester {
   rayTarget: string | null = null;
   proximityTarget: string | null = null;
+  /** The cone query's answer while `withCone` is set; the runtime falls back to `hitRay` otherwise. */
+  coneTarget: string | null = null;
+  conePoint: Vec3Tuple = [0, 1.5, -2];
+  /** The last cone query, so a test can see the angle and length the runtime asked for. */
+  lastCone: { ray: RayTuple; halfAngle: number; maxLength: number } | null = null;
+  hitCone?: (ray: RayTuple, halfAngle: number, maxLength: number) => InteractableHit | null;
+
+  constructor(withCone = false) {
+    if (withCone) {
+      this.hitCone = (ray, halfAngle, maxLength) => {
+        this.lastCone = { ray, halfAngle, maxLength };
+        return this.coneTarget
+          ? { interactableId: this.coneTarget, distance: 2, point: [...this.conePoint] }
+          : null;
+      };
+    }
+  }
+  /** Distance reported for the proximity hit; 1 cm by default, well inside every radius. */
+  proximityDistance = 0.01;
+  /** The radius of the last proximity query, so a test can see what the runtime asked for. */
+  lastProximityRadius: number | null = null;
+  /** Every proximity query radius of the last update, in order (touch, then grab), reset each `hitRay`-free frame by the test. */
+  proximityRadii: number[] = [];
 
   hitRay(_ray: RayTuple): InteractableHit | null {
     return this.rayTarget
@@ -76,9 +104,11 @@ export class FakeHitTester implements HitTester {
       : null;
   }
 
-  hitProximity(_point: Vec3Tuple, _radius: number): InteractableHit | null {
-    return this.proximityTarget
-      ? { interactableId: this.proximityTarget, distance: 0.01, point: [0, 0, 0] }
+  hitProximity(_point: Vec3Tuple, radius: number): InteractableHit | null {
+    this.lastProximityRadius = radius;
+    this.proximityRadii.push(radius);
+    return this.proximityTarget && this.proximityDistance <= radius
+      ? { interactableId: this.proximityTarget, distance: this.proximityDistance, point: [0, 0, 0] }
       : null;
   }
 }
@@ -89,8 +119,17 @@ export class FakeTransform implements TransformPort {
   localRotation: QuatTuple = [0, 0, 0, 1];
   worldPose: PoseTuple | null = null;
   effect: { scale?: number; emissive?: number } | null = null;
+  /** Physics state, tracked for the held/released assertions in behaviours.test.ts. */
+  held = false;
+  holdStarts = 0;
+  releases: HoldRelease[] = [];
 
+  /** The last pose written through setWorldPose, else the rest pose. */
   getWorldPose(): PoseTuple {
+    return this.worldPose ?? this.restPose;
+  }
+
+  getRestWorldPose(): PoseTuple {
     return this.restPose;
   }
 
@@ -112,6 +151,16 @@ export class FakeTransform implements TransformPort {
 
   setEffect(effect: { scale?: number; emissive?: number }): void {
     this.effect = effect;
+  }
+
+  beginHold(): void {
+    this.held = true;
+    this.holdStarts += 1;
+  }
+
+  endHold(release: HoldRelease): void {
+    this.held = false;
+    this.releases.push(release);
   }
 }
 

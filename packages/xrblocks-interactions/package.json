@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/xrblocks-interactions",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "EXPERIMENTAL Google XR Blocks adapter for the Reality Collective Interaction Extensions - maps XR Blocks' input pipeline (Input.getFrame() ray sources + direct touches, Script select events) into the engine-free @realitycollective/webxr-interactions core, reusing the three.js hit-testing/transform machinery. Structurally typed: no xrblocks import. Re-exports the core.",
   "keywords": [
     "realitycollective",
@@ -10,7 +10,10 @@
     "threejs",
     "interaction",
     "input",
-    "typescript"
+    "typescript",
+    "physics",
+    "rapier",
+    "pointer"
   ],
   "license": "MIT",
   "author": "Reality Collective",
@@ -33,9 +36,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-input": "^0.1.4",
-    "@realitycollective/webxr-interactions": "^0.1.0",
-    "@realitycollective/threejs-interactions": "^0.1.0"
+    "@realitycollective/webxr-input": "^0.1.8",
+    "@realitycollective/webxr-interactions": "^0.1.1",
+    "@realitycollective/threejs-interactions": "^0.1.1"
   },
   "peerDependencies": {
     "three": ">=0.170.0"

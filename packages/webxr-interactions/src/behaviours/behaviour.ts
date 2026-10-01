@@ -33,8 +33,23 @@ export interface InteractorInfo {
   ray?: RayTuple;
   gripPose?: PoseTuple;
   indexTip?: Vec3Tuple;
+  /**
+   * Grip velocity, present on the same terms as `InputSourceSnapshot`'s -
+   * the runtime's `VelocityTracker` fills it when the provider does not.
+   * `onGrabEnd`'s release throw reads these; absent on a synthesized
+   * release (source lost, target unregistered, runtime disposed), which
+   * behaves as zero.
+   */
+  linearVelocity?: Vec3Tuple;
+  angularVelocity?: Vec3Tuple;
   select: number;
   squeeze: number;
+  /**
+   * True on a release the runtime synthesised because the source was lost,
+   * the target unregistered or disabled, or the runtime disposed: no hand
+   * let go. A grab behaviour then hands its port zeros instead of a throw.
+   */
+  synthesized?: true;
 }
 
 /** Everything a behaviour can reach during a tick or a routed moment. */
@@ -44,7 +59,7 @@ export interface BehaviourContext {
   transform: TransformPort | undefined;
   emit(event: Omit<InteractionEvent, "interactableId">): void;
   feedback(intent: Omit<FeedbackIntent, "interactableId">): void;
-  /** REST world pose of another registered interactable (toss scoring). */
+  /** LIVE world pose of another registered interactable (toss scoring). */
   getWorldPose(interactableId: string): PoseTuple | undefined;
 }
 
@@ -73,7 +88,17 @@ export interface Behaviour {
   getValue(): number;
 }
 
-/** Hand position a hand-driven behaviour should track, best available. */
+/**
+ * The point a hand-driven behaviour (dial, slide, hinge) tracks while a
+ * holder grabs it: the GRIP, as IWSDK moves a held object with its grab
+ * pointer, which is built on `xrOrigin.gripSpaces[side]` (`@iwsdk/xr-input`
+ * `grab-pointer.js`; `@pmndrs/handle` then moves the object with that
+ * pointer). Never the index fingertip: with a closed hand the fingertip
+ * curls into the palm and barely moves around a wheel's axis, which is why
+ * the native handwheel would not turn (Pale Signal handover, G2). A source
+ * with no grip (a desktop pointer) falls back to its fingertip, then its
+ * ray origin.
+ */
 export function holderPoint(holder: InteractorInfo): Vec3Tuple | undefined {
-  return holder.indexTip ?? holder.gripPose?.position ?? holder.ray?.origin;
+  return holder.gripPose?.position ?? holder.indexTip ?? holder.ray?.origin;
 }

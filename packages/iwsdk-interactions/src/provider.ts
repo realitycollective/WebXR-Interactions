@@ -16,13 +16,17 @@
 import { VisibilityState, type World } from "@iwsdk/core";
 import { InputComponent } from "@iwsdk/xr-input";
 import {
+  EyeGazeInput,
   NO_CAPABILITIES,
+  type EyeGazeFrame,
+  type EyeGazeOptions,
   type Handedness,
   type HeadPose,
   type InputCapabilities,
   type InputHitHint,
   type InputProvider,
   type InputSourceSnapshot,
+  type PoseTuple,
   type PresenceModality,
   type Unsubscribe,
 } from "@realitycollective/webxr-input";
@@ -33,6 +37,30 @@ export interface IWSDKProviderOptions {
    * so grab behaviours are fulfilled NATIVELY by the engine.
    */
   nativeGrab?: boolean;
+  /**
+   * Tuning for the eye-gaze rule this provider applies (the filter, the
+   * tracking-loss grace). Defaults are IWSDK 1.0.0's own (`EYE_GAZE_DEFAULTS`),
+   * so an app that left `GazeSystem` at its defaults needs nothing here.
+   */
+  eyeGaze?: EyeGazeOptions;
+}
+
+/** The seconds a sample integrates over until the bridge system reports the real delta. */
+const DEFAULT_FRAME_SECONDS = 1 / 60;
+
+/**
+ * The slice of `world.input.xr.xrOrigin` read for eye gaze: IWSDK's own
+ * sampled gaze pose (`GazePointer.sampleGazePose` writes it) and whether it
+ * is valid this frame. Declared structurally, as the presence adapters are.
+ */
+interface EyeSpaceLike {
+  getWorldPosition(target: Vector3): Vector3;
+  getWorldQuaternion(target: Quaternion): Quaternion;
+}
+
+interface XROriginLike {
+  eyeSpace?: EyeSpaceLike | undefined;
+  gazeOrigin?: string | undefined;
 }
 
 type Side = "left" | "right";
@@ -62,7 +90,7 @@ interface PresenceAdaptersLike {
  * Show or hide a visual by walking its DESCENDANTS rather than setting
  * `visible` on the root.
  *
- * Verified against `@iwsdk/xr-input` 0.5.3 (`dist/xr-input-manager.js`, the
+ * Verified against `@iwsdk/xr-input` 0.5.3 and 1.0.0 (`dist/xr-input-manager.js`, the
  * per-frame update): IWSDK writes `visualAdapter.visual.model.visible =
  * inputSourceData.isPrimary` every frame, so a root-level write is undone
  * before it is drawn. The engine never touches the descendants, so hiding
@@ -112,6 +140,8 @@ export class IWSDKInputProvider implements InputProvider {
   private presenceRequested = false;
   private readonly disposers: Unsubscribe[] = [];
   private boundSession: XRSession | null = null;
+  private readonly eyeGaze: EyeGazeInput;
+  private frameSeconds = DEFAULT_FRAME_SECONDS;
   private readonly onSourcesChange = () => {
     this.refreshCapabilities();
     for (const listener of [...this.sourceListeners]) listener();
@@ -120,6 +150,7 @@ export class IWSDKInputProvider implements InputProvider {
   constructor(world: World, options: IWSDKProviderOptions = {}) {
     this.world = world;
     this.nativeGrab = options.nativeGrab ?? false;
+    this.eyeGaze = new EyeGazeInput(options.eyeGaze);
     this.capabilities = { ...NO_CAPABILITIES };
     const unsubscribe = world.visibilityState.subscribe(() => {
       this.bindSession();
@@ -147,6 +178,66 @@ export class IWSDKInputProvider implements InputProvider {
     return false;
   }
 
+  /**
+   * IWSDK's `findGazeSource`: the session carries an input source whose
+   * `targetRayMode` is `"gaze"`, in `inputSources` or, on a runtime that
+   * lists non-primary sources only there, `trackedSources`.
+   */
+  private hasGazeSource(): boolean {
+    const session = this.world.session as
+      | (XRSession & { trackedSources?: Iterable<XRInputSource> })
+      | null
+      | undefined;
+    if (!session) return false;
+    for (const source of session.inputSources) {
+      if (source.targetRayMode === "gaze") return true;
+    }
+    for (const source of session.trackedSources ?? []) {
+      if (source.targetRayMode === "gaze") return true;
+    }
+    return false;
+  }
+
+  /** The seconds the next `sample()` integrates over (the eye-gaze filter and grace); the bridge system sets it each frame. */
+  setFrameDelta(seconds: number): void {
+    this.frameSeconds = seconds;
+  }
+
+  /**
+   * This frame's eye-gaze reading, from IWSDK's own sample: `xrOrigin.eyeSpace`
+   * is the gaze target-ray pose `GazePointer.sampleGazePose` wrote, valid while
+   * `gazeOrigin` is `"tracked"`. Reading IWSDK's sample rather than the WebXR
+   * frame keeps this provider on exactly the pose, and the validity, the
+   * engine's own gaze pointer uses; an app that never registered
+   * `GazeSystem` leaves `gazeOrigin` at `"none"`, and then neither IWSDK nor
+   * this provider hands far targeting to gaze. Each hand's ray-space pose
+   * comes from the rig's ray spaces, as `GazePointer.processSelector` reads it.
+   */
+  private eyeGazeFrame(): EyeGazeFrame {
+    const origin = (this.world.input.xr as unknown as { xrOrigin?: XROriginLike }).xrOrigin;
+    let pose: PoseTuple | null = null;
+    if (origin?.eyeSpace && origin.gazeOrigin === "tracked") {
+      const position = origin.eyeSpace.getWorldPosition(TEMP.v1);
+      const quaternion = origin.eyeSpace.getWorldQuaternion(TEMP.q1);
+      pose = {
+        position: [position.x, position.y, position.z],
+        quaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
+      };
+    }
+    const rayPoses: Partial<Record<Side, PoseTuple>> = {};
+    for (const side of SIDES) {
+      const rayObject = this.world.playerSpaceEntities.raySpaces[side].object3D;
+      if (!rayObject) continue;
+      const position = rayObject.getWorldPosition(TEMP.v1);
+      const quaternion = rayObject.getWorldQuaternion(TEMP.q1);
+      rayPoses[side] = {
+        position: [position.x, position.y, position.z],
+        quaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
+      };
+    }
+    return { present: this.capabilities.eyeGaze, pose, rayPoses };
+  }
+
   private refreshCapabilities(): void {
     const session = this.world.session;
     const immersive = !!session;
@@ -170,6 +261,8 @@ export class IWSDKInputProvider implements InputProvider {
       pinch: handTracking,
       buttonsAxes,
       gaze: true,
+      // IWSDK: `xr.features.gazeTracking` granted surfaces a gaze input source.
+      eyeGaze: immersive && this.hasGazeSource(),
       headPose: true,
       haptics,
       // IWSDK builds and owns both visual families, so presence is always
@@ -218,8 +311,10 @@ export class IWSDKInputProvider implements InputProvider {
     // per-frame update, and a capability refresh can change the modality
     // underneath us, so the desired state has to be pushed again.
     if (this.presenceRequested) this.applyPresence(true);
-    if (!this.world.session) return [];
-    if (this.world.visibilityState.peek() !== VisibilityState.Visible) return [];
+    if (!this.world.session || this.world.visibilityState.peek() !== VisibilityState.Visible) {
+      this.eyeGaze.reset();
+      return [];
+    }
 
     const spaces = this.world.playerSpaceEntities;
     const snapshots: InputSourceSnapshot[] = [];
@@ -272,7 +367,10 @@ export class IWSDKInputProvider implements InputProvider {
       this.sideBySourceId.set(snapshot.id, side);
       snapshots.push(snapshot);
     }
-    return snapshots;
+    if (!this.capabilities.eyeGaze) return snapshots;
+    // The eye-gaze rule, over IWSDK's own gaze sample: far rays go to gaze
+    // exactly when IWSDK's `GazePointer` takes them.
+    return this.eyeGaze.update(this.eyeGazeFrame(), snapshots, this.frameSeconds);
   }
 
   // -- presence ---------------------------------------------------------------
@@ -388,6 +486,7 @@ export class IWSDKInputProvider implements InputProvider {
     for (const dispose of this.disposers) dispose();
     this.disposers.length = 0;
     this.sideBySourceId.clear();
+    this.eyeGaze.reset();
   }
 }
 

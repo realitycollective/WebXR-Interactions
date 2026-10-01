@@ -15,9 +15,12 @@
  */
 import type { RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
+  surfacePointOnSphere,
+  coneHitForSpheres,
   rayPointDistance,
   type HitTester,
   type InteractableHit,
+  type SphereTarget,
 } from "@realitycollective/webxr-interactions";
 import { nodeShowing, parentOf, toVec3, type BabylonTransformNodeLike } from "./babylon-types.js";
 
@@ -124,10 +127,31 @@ export class BabylonHitTester implements HitTester {
       const distance =
         Math.hypot(at[0] - point[0], at[1] - point[1], at[2] - point[2]) - targetRadius;
       if (distance <= radius && (best === null || distance < best.distance)) {
-        best = { interactableId: id, distance: Math.max(0, distance), point: at };
+        // The surface point nearest the fingertip, where the touch cursor sits.
+        best = { interactableId: id, distance: Math.max(0, distance), point: surfacePointOnSphere(at, targetRadius, point) };
       }
     }
     return best;
+  }
+
+  /**
+   * The eye-gaze cone (`ports.ts`, `hitCone`) over the registered spheres,
+   * the core's `coneHitForSpheres`. With an app-supplied `pickWithRay`, a
+   * mesh the ray itself reaches wins first, as it does for `hitRay`.
+   */
+  hitCone(ray: RayTuple, halfAngle: number, maxLength: number): InteractableHit | null {
+    if (this.pickWithRay) {
+      const direct = this.hitRay(ray);
+      if (direct && direct.distance <= maxLength) return direct;
+    }
+    const spheres: SphereTarget[] = [];
+    for (const [id, { node, radius }] of this.entries) {
+      if (!nodeShowing(node)) continue;
+      const center = toVec3(node.getAbsolutePosition());
+      if (center) spheres.push({ id, center, radius });
+    }
+    const hit = coneHitForSpheres(ray, spheres, halfAngle, maxLength);
+    return hit ? { interactableId: hit.interactableId, distance: hit.distance, point: hit.point } : null;
   }
 
   /** The registered interactable a picked node belongs to, if any. */

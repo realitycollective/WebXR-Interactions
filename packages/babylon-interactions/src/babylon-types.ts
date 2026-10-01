@@ -53,8 +53,22 @@ export interface BabylonObservableLike<T> {
 }
 
 /**
- * Structural slice of Babylon's `TransformNode`, plus the one member
- * `AbstractMesh` adds that this adapter reads (`isVisible`).
+ * Structural slice of Babylon's `StandardMaterial`/`PBRMaterial` emissive
+ * channel - written from the Babylon 7 documentation, on the same honesty
+ * terms as the rest of this file. `emissiveColor` is common to both;
+ * `emissiveIntensity` is a PBRMaterial-only scalar multiplier over it -
+ * `StandardMaterial` has no such field, so it is absent there and
+ * `BabylonTransformPort.setEffect` only scales `emissiveColor` for one.
+ */
+export interface BabylonMaterialLike {
+  emissiveColor?: BabylonVector3Like;
+  /** PBRMaterial only - StandardMaterial carries no separate intensity. */
+  emissiveIntensity?: number;
+}
+
+/**
+ * Structural slice of Babylon's `TransformNode`, plus the two members
+ * `AbstractMesh` adds that this adapter reads (`isVisible`, `material`).
  *
  * `parent` is `unknown` on purpose: Babylon types it as `Nullable<Node>`,
  * and `Node` carries none of the transform members, so anything narrower
@@ -71,6 +85,137 @@ export interface BabylonTransformNodeLike {
   setEnabled?(value: boolean): void;
   isEnabled?(checkAncestors?: boolean): boolean;
   isVisible?: boolean;
+  /** Present only on a node Physics V2 has a body for - see {@link BabylonPhysicsBodyLike}. */
+  physicsBody?: BabylonPhysicsBodyLike;
+  /** `AbstractMesh.material` - a multi-material mesh's first slot is what `setEffect`'s emissive pulse lights. */
+  material?: BabylonMaterialLike | BabylonMaterialLike[] | null;
+  /**
+   * `AbstractMesh.getTotalVertices()` - absent, or zero, on a plain
+   * `TransformNode` with no geometry of its own. `BabylonPhysicsFacility`'s
+   * `"auto"` shape reads this to tell a real mesh from an empty node, the
+   * same distinction `RapierPhysicsFacility` makes from an object's bounds.
+   */
+  getTotalVertices?(): number;
+}
+
+/**
+ * Structural slice of Babylon's `PhysicsBody` (Physics V2, Havok or any
+ * other plugin behind the same API) - present on `BabylonTransformNodeLike`
+ * only when the node has one. Written from the Babylon 7 Physics V2
+ * documentation, on the same honesty terms as the rest of this file: this
+ * package has no `@babylonjs/core` (or `@babylonjs/havok`) dependency to
+ * verify it against, so `BabylonTransformPort`'s held-pose behaviour is
+ * unverified against a live Babylon scene, and the maintainer should
+ * confirm it there before shipping.
+ *
+ * `disablePreStep` is Babylon's switch for which way a body and its node
+ * agree on the truth: `false` (the default) is physics-drives-node - the
+ * simulation writes the node's transform every step; `true` is
+ * node-drives-physics - Babylon reads the node's transform instead of
+ * writing it. Held, released and reset all briefly need the second
+ * direction, so the port toggles it around each of the three.
+ *
+ * The read/damping/gravity/target members below back `BabylonPhysicsFacility`
+ * (`physics-facility.ts`), which needs a body's current state and the
+ * ability to teleport it, not only switch it - `BabylonTransformPort`'s own
+ * physicsMotionTypes hold does not need them.
+ */
+export interface BabylonPhysicsBodyLike {
+  disablePreStep: boolean;
+  /** `PhysicsBody.shape` - `Nullable<PhysicsShape>`, the collider driving this body; settable to swap it. */
+  shape?: BabylonPhysicsShapeLike | null;
+  setMotionType(motionType: unknown): void;
+  /** `PhysicsBody.getMotionType()` - the value last given to `setMotionType`. */
+  getMotionType(): unknown;
+  setLinearVelocity(velocity: BabylonVector3Like): void;
+  /** `PhysicsBody.getLinearVelocity()` - metres per second, world space. */
+  getLinearVelocity(): BabylonVector3Like;
+  setAngularVelocity(velocity: BabylonVector3Like): void;
+  /** `PhysicsBody.getAngularVelocity()` - radians per second, world space. */
+  getAngularVelocity(): BabylonVector3Like;
+  /** `PhysicsBody.setGravityFactor()` - multiplier on the world's gravity for this body. */
+  setGravityFactor(factor: number): void;
+  /** `PhysicsBody.setLinearDamping()` - fraction of linear velocity lost per second. */
+  setLinearDamping(damping: number): void;
+  /** `PhysicsBody.setAngularDamping()` - fraction of angular velocity lost per second. */
+  setAngularDamping(damping: number): void;
+  /**
+   * `PhysicsBody.setTargetTransform()` - Babylon's teleport for a body: sets
+   * where the body (and, for an `ANIMATED` one, its kinematic target) is
+   * next, in world space, independent of the node's own parent frame.
+   */
+  setTargetTransform(position: BabylonVector3Like, rotation: BabylonQuaternionLike): void;
+  /** `PhysicsBody.dispose()` - releases the body's Havok handle. */
+  dispose(): void;
+}
+
+/**
+ * Structural slice of Babylon's `PhysicsShape` (a `PhysicsShapeSphere`,
+ * `PhysicsShapeBox`, `PhysicsShapeCapsule` or `PhysicsShapeMesh` - every
+ * kind shares this surface). `material` is a plain data object Havok reads
+ * each step, not a class - Babylon's own `PhysicsShape.material` setter
+ * takes the same shape.
+ */
+export interface BabylonPhysicsShapeLike {
+  material: { friction: number; restitution: number };
+  /** Kilograms per cubic metre; `PhysicsBody`'s mass follows from it. */
+  density: number;
+  /** `PhysicsShape.dispose()` - releases the shape's Havok handle. */
+  dispose(): void;
+}
+
+/**
+ * The Havok-era Physics V2 constructors and values `BabylonPhysicsFacility`
+ * needs, handed over by the app exactly as `BabylonTransformPortOptions.physicsMotionTypes`
+ * already does for the two motion types it reads - this package has no
+ * `@babylonjs/core` dependency to import them from.
+ */
+export interface BabylonPhysicsKitLike {
+  PhysicsBody: new (
+    node: BabylonTransformNodeLike,
+    motionType: unknown,
+    startsAsleep: boolean,
+    scene: BabylonSceneLike,
+  ) => BabylonPhysicsBodyLike;
+  PhysicsShapeSphere: new (center: BabylonVector3Like, radius: number, scene: BabylonSceneLike) => BabylonPhysicsShapeLike;
+  PhysicsShapeBox: new (
+    center: BabylonVector3Like,
+    rotation: BabylonQuaternionLike,
+    extents: BabylonVector3Like,
+    scene: BabylonSceneLike,
+  ) => BabylonPhysicsShapeLike;
+  /** `pointA`/`pointB` are the capsule's two hemisphere centres along its axis. */
+  PhysicsShapeCapsule: new (
+    pointA: BabylonVector3Like,
+    pointB: BabylonVector3Like,
+    radius: number,
+    scene: BabylonSceneLike,
+  ) => BabylonPhysicsShapeLike;
+  /** For an `"auto"` shape over a node with geometry - see `getTotalVertices` above. */
+  PhysicsShapeMesh: new (mesh: BabylonTransformNodeLike, scene: BabylonSceneLike) => BabylonPhysicsShapeLike;
+  PhysicsMotionType: { STATIC: unknown; ANIMATED: unknown; DYNAMIC: unknown };
+  Vector3: new (x: number, y: number, z: number) => BabylonVector3Like;
+  Quaternion: new (x: number, y: number, z: number, w: number) => BabylonQuaternionLike;
+}
+
+/**
+ * Structural slice of Babylon's `IPhysicsEngine` - the plugin-level physics
+ * world (Havok, or another plugin behind the same API) a scene owns once the
+ * app calls `scene.enablePhysics(...)`.
+ */
+export interface BabylonPhysicsEngineLike {
+  setGravity(gravity: BabylonVector3Like): void;
+  gravity: BabylonVector3Like;
+  /**
+   * Babylon's own per-frame physics step, called internally by
+   * `Scene.render()` once physics is enabled - not part of the public API,
+   * named here only so `BabylonPhysicsFacility.step` can advance the
+   * simulation directly where nothing drives a render loop (a test, or an
+   * app that ticks physics outside Babylon's own loop). Babylon normally
+   * steps physics itself; a facility never needs to call this in a real
+   * running scene with a render loop.
+   */
+  _step?(dtSeconds: number): void;
 }
 
 /** Structural slice of Babylon's `Camera`. */
@@ -128,6 +273,8 @@ export interface BabylonSceneLike {
   pick?(x: number, y: number): BabylonPickingInfoLike | null;
   activeCamera?: BabylonCameraLike | null;
   getEngine?(): BabylonEngineLike;
+  /** `Scene.getPhysicsEngine()` - null until the app calls `scene.enablePhysics(...)`. */
+  getPhysicsEngine?(): BabylonPhysicsEngineLike | null;
 }
 
 /** Structural slice of one `WebXRControllerComponent` reading. */
@@ -194,6 +341,18 @@ export interface BabylonXRExperienceLike {
 
 /** The name Babylon registers hand tracking under in the features manager. */
 export const HAND_TRACKING_FEATURE = "xr-hand-tracking";
+
+/** The name Babylon registers eye tracking under in the features manager (`WebXREyeTracking.Name`). */
+export const EYE_TRACKING_FEATURE = "xr-eye-tracking";
+
+/**
+ * Structural slice of `WebXREyeTracking`: `isEyeGazeValid` says the runtime
+ * posed the gaze this frame, `getEyeGaze()` is the gaze ray, world space.
+ */
+export interface BabylonEyeTrackingLike {
+  isEyeGazeValid?: boolean;
+  getEyeGaze(): BabylonRayLike | null | undefined;
+}
 
 /** Index fingertip joint, as WebXR and Babylon both spell it. */
 export const INDEX_TIP_JOINT = "index-finger-tip";
