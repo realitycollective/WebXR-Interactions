@@ -6,6 +6,7 @@
  * three.js `Object3D`s - only the world around them is faked. Nothing here
  * mocks a module; the provider is given an object of the right shape.
  */
+import { World as EcsWorld } from "elics";
 import { Object3D } from "three";
 import {
   PhysicsBody,
@@ -97,6 +98,19 @@ export interface FakePhysicsMemory {
  * pose into `memory` before every step and pushes the simulated one back
  * after, so that gap never outlives one step.
  */
+/**
+ * What IWSDK does for an app with `features.physics` on: register the physics
+ * components with the world. A fake entity standing in for a physics-on world
+ * calls this, so the binding sees the components as a real world would. A
+ * test of a physics-off world never calls it.
+ */
+let physicsRegistered = false;
+export function registerPhysicsComponents(): void {
+  if (physicsRegistered) return;
+  physicsRegistered = true;
+  new EcsWorld().registerComponent(PhysicsBody).registerComponent(PhysicsShape).registerComponent(PhysicsManipulation);
+}
+
 export class FakePhysicsEntity {
   readonly object3D = new Object3D();
   private readonly components = new Map<unknown, Record<string, unknown>>();
@@ -104,6 +118,7 @@ export class FakePhysicsEntity {
 
   constructor(memory?: FakePhysicsMemory) {
     this.memory = memory;
+    registerPhysicsComponents();
   }
 
   addComponent(component: unknown, initialData: Record<string, unknown> = {}): this {
@@ -352,7 +367,50 @@ export interface FakeXROrigin {
   gazeOrigin: "tracked" | "none";
 }
 
+/** A fake IWSDK `MultiPointer` slice that records what the adapter writes. */
+export interface FakeMultiPointer {
+  ray: { visual: { rayDisplayMode: number; ray: { scale: { z: number }; visible: boolean } } };
+  cursorVisual: { setVisible(visible: boolean): void; cursor: { visible: boolean } };
+  /** Every `setVisible` argument, in order. */
+  cursorCalls: boolean[];
+  /** Every value written to `rayDisplayMode`, in order. */
+  modeWrites: number[];
+}
+
+/** IWSDK's defaults: mode `VisibleOnIntersection` (2), a 1 m visible ray, a visible cursor. */
+export function fakeMultiPointer(): FakeMultiPointer {
+  const cursorCalls: boolean[] = [];
+  const modeWrites: number[] = [];
+  let mode = 2;
+  const cursor = { visible: true };
+  return {
+    ray: {
+      visual: {
+        get rayDisplayMode() {
+          return mode;
+        },
+        set rayDisplayMode(value: number) {
+          mode = value;
+          modeWrites.push(value);
+        },
+        ray: { scale: { z: 1 }, visible: true },
+      },
+    },
+    cursorVisual: {
+      setVisible(visible: boolean) {
+        cursorCalls.push(visible);
+        cursor.visible = visible;
+      },
+      cursor,
+    },
+    cursorCalls,
+    modeWrites,
+  };
+}
+
 export interface FakeWorldOptions {
+  /** Give the rig IWSDK's `multiPointers`; absent, `world.input.xr.multiPointers` is undefined. */
+  multiPointers?: Partial<Record<Side, FakeMultiPointer>>;
   session?: FakeSession | null;
   visibility?: string;
   gamepads?: Partial<Record<Side, FakeGamepad>>;
@@ -375,6 +433,7 @@ export interface FakeWorld {
       gamepads: Partial<Record<Side, FakeGamepad>>;
       visualAdapters?: FakeVisualAdapters;
       xrOrigin?: FakeXROrigin;
+      multiPointers?: Partial<Record<Side, FakeMultiPointer>>;
     };
   };
   registerSystem(system: unknown): void;
@@ -408,6 +467,7 @@ export function makeWorld(options: FakeWorldOptions = {}): FakeWorld {
     input: {
       xr: {
         gamepads: options.gamepads ?? {},
+        ...(options.multiPointers ? { multiPointers: options.multiPointers } : {}),
         ...(options.visualAdapters ? { visualAdapters: options.visualAdapters } : {}),
         ...(options.gaze
           ? { xrOrigin: { eyeSpace: eyeSpaceAt(0, 1.6, 0), gazeOrigin: options.gaze.tracked ? "tracked" : "none" } as FakeXROrigin }

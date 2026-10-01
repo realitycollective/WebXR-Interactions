@@ -1,0 +1,24 @@
+{
+  "id": "rc-interactions-harness",
+  "name": "RC Interactions Harness",
+  "applicationId": "com.realitycollective.harness.interactions",
+  "version": "0.1.1",
+  "versionCode": 1,
+  "entry": "entry.ts",
+  "web": "../..",
+  "content": {
+    "scenes": "./scenes",
+    "sceneAssets": "./scene-assets.ts"
+  },
+  "targets": [
+    "quest"
+  ],
+  "capabilities": [
+    "handTracking"
+  ],
+  "checks": {
+    "run": [
+      { "mode": "kits", "ticks": 600 }
+    ]
+  }
+}

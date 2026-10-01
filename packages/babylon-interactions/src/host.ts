@@ -18,6 +18,9 @@ import {
   type PhysicsBodySpec,
   type PhysicsFacility,
   type PhysicsShapeSpec,
+  type PointerArbiter,
+  type PointerDisplay,
+  type PointerDisplayConfig,
 } from "@realitycollective/webxr-interactions";
 import { nodeWorldPose, type BabylonPhysicsKitLike, type BabylonTransformNodeLike } from "./babylon-types.js";
 import {
@@ -25,6 +28,7 @@ import {
   type BabylonHitTesterOptions,
   type BabylonPickWithRay,
 } from "./hit-tester.js";
+import { BabylonPointerVisuals, type BabylonPointerVisualsKit } from "./pointer-visuals.js";
 import { BabylonPhysicsFacility } from "./physics-facility.js";
 import { BabylonTransformPort, type BabylonTransformPortOptions } from "./transform-port.js";
 import { BabylonInputProvider, type BabylonProviderOptions } from "./provider.js";
@@ -39,6 +43,28 @@ export interface BabylonInteractionsOptions
    * `update` from its own loop.
    */
   attachToScene?: boolean;
+  /**
+   * The pointer arbiter shared with the UI Extensions window host
+   * (`connectUIExtensions({ pointers })`), so one decision per source covers
+   * panels and interactables, as IWSDK's `MultiPointer` does. Omit when the
+   * app has no panels.
+   */
+  pointers?: PointerArbiter;
+  /**
+   * The app's pointer display settings: ray never, always or while hitting;
+   * cursors on objects and on panels; the ray and cursor look. Defaults are
+   * IWSDK 1.0.0's. Change them at run time through
+   * `runtime.getPointerDisplay().set(...)`.
+   */
+  pointerDisplay?: PointerDisplay | Partial<PointerDisplayConfig>;
+  /**
+   * Draw the ray stub and the cursor disc for every source, IWSDK's look,
+   * into `options.scene`, exactly as the core decides them each frame. Pass
+   * `{ kit }`, the Babylon constructors the renderer builds its meshes from.
+   * Omit to draw nothing (an app that draws its own reads
+   * `runtime.onPointerDrawing`).
+   */
+  pointerVisuals?: { kit: BabylonPointerVisualsKit };
   /**
    * The platform's physics. Havok (Physics V2) is the named default engine
    * for Babylon: pass `{ kit }`, the Havok-era values from
@@ -78,6 +104,8 @@ export class BabylonInteractions {
   readonly hitTester: BabylonHitTester;
   /** The platform's physics, when the setup was given one. */
   readonly physics: PhysicsFacility | null;
+  /** The ray and cursor renderer, when the setup was given `pointerVisuals`. */
+  readonly pointerVisuals: BabylonPointerVisuals | null;
   private readonly stepPhysics: boolean;
   private readonly ports = new Map<string, BabylonTransformPort>();
   private readonly nodes = new Map<string, BabylonTransformNodeLike>();
@@ -90,7 +118,12 @@ export class BabylonInteractions {
       provider: this.provider,
       hitTester: this.hitTester,
       ...(options.dwellDefaults ? { dwellDefaults: options.dwellDefaults } : {}),
+      ...(options.pointers ? { pointers: options.pointers } : {}),
+      ...(options.pointerDisplay ? { pointerDisplay: options.pointerDisplay } : {}),
     });
+    this.pointerVisuals = options.pointerVisuals
+      ? new BabylonPointerVisuals({ runtime: this.runtime, kit: options.pointerVisuals.kit, scene: options.scene })
+      : null;
     this.physics = options.physics
       ? "kit" in options.physics
         ? new BabylonPhysicsFacility(options.scene, options.physics.kit, { nodeFor: (id) => this.nodes.get(id) })
@@ -163,6 +196,7 @@ export class BabylonInteractions {
   dispose(): void {
     this.detachScene?.();
     this.detachScene = null;
+    this.pointerVisuals?.dispose();
     this.runtime.dispose();
     this.provider.dispose();
     this.physics?.dispose();

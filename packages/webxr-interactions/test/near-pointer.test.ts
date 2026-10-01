@@ -77,8 +77,8 @@ describe("pickActivePointer and pointerVisualsFor", () => {
 
   it("shows the ray only while the ray or nothing owns the source, and the cursor only with a candidate", () => {
     const point: Vec3Tuple = [0, 1, -1];
-    expect(pointerVisualsFor("s", true, "ray", { targetId: "t", point, distance: 1 })).toEqual({ sourceId: "s", activePointer: "ray", ray: true, cursor: true, cursorPoint: point });
-    expect(pointerVisualsFor("s", true, null, null)).toEqual({ sourceId: "s", activePointer: null, ray: true, cursor: false, cursorPoint: null });
+    expect(pointerVisualsFor("s", true, "ray", { targetId: "t", point, distance: 1 })).toEqual({ sourceId: "s", activePointer: "ray", ray: true, cursor: true, cursorPoint: point, targetKind: "object", targetId: "t", hitDistance: 1 });
+    expect(pointerVisualsFor("s", true, null, null)).toEqual({ sourceId: "s", activePointer: null, ray: true, cursor: false, cursorPoint: null, targetKind: null, targetId: null, hitDistance: null });
     expect(pointerVisualsFor("s", true, "touch", { targetId: "t", point, distance: 0 }).ray).toBe(false);
     expect(pointerVisualsFor("s", false, null, null).ray).toBe(false);
     expect(pointerVisualsFor("s", true, "grab", null).cursor).toBe(false);
@@ -105,7 +105,7 @@ describe("runtime publication", () => {
     provider.sources = [raySource("right")];
     runtime.update(1 / 60);
     expect(runtime.getActivePointer("right")).toBe("ray");
-    expect(runtime.getPointerVisuals("right")).toEqual({ sourceId: "right", activePointer: "ray", ray: true, cursor: true, cursorPoint: [0, 0, 0] });
+    expect(runtime.getPointerVisuals("right")).toEqual({ sourceId: "right", activePointer: "ray", ray: true, cursor: true, cursorPoint: [0, 0, 0], targetKind: "object", targetId: "button", hitDistance: 1 });
     expect(published).toHaveLength(1);
 
     // A fingertip 1 cm from the surface: touch owns the hand, ray hidden, no press yet (never from inside).

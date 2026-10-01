@@ -15,12 +15,12 @@
  * Runner-free, like the core suites: a case resolves on success and rejects
  * with a plain `Error` naming its row otherwise.
  */
+import { POINTER_DISPLAY_DEFAULTS } from "@realitycollective/webxr-input";
 import {
   hitTesterContractCases,
   nearPointerContractCases,
   physicsFacilityContractCases,
   type HoldRelease,
-  type PointerVisuals,
 } from "@realitycollective/webxr-interactions";
 import { NativeHitTester } from "./hit-tester.js";
 import { NativeInteractions } from "./host.js";
@@ -33,8 +33,37 @@ import type {
   NativeInteractionHost,
   NativeInteractionsTestHost,
   NativePhysicsHost,
+  NativePointerVisuals,
   NativePresenceShown,
 } from "./native-types.js";
+
+/** A drawing as the binding hands it: IWSDK's defaults resolved for one decision. */
+function told(sourceId: string, decision: Partial<NativePointerVisuals>): NativePointerVisuals {
+  const d = POINTER_DISPLAY_DEFAULTS;
+  return {
+    sourceId,
+    ray: false,
+    rayFrom: d.rayHandFade,
+    raySolidTo: d.rayReach - d.rayFade,
+    rayTo: d.rayReach,
+    rayRadius: d.rayRadius,
+    rayColor: [d.rayColor[0], d.rayColor[1], d.rayColor[2]],
+    cursor: false,
+    cursorPoint: null,
+    cursorRadius: d.cursorRadius,
+    cursorOpacity: d.cursorOpacity,
+    cursorOffset: d.cursorOffset,
+    activePointer: null,
+    targetKind: null,
+    targetId: null,
+    hitDistance: null,
+    ...decision,
+  };
+}
+
+function samePoint(a: readonly number[] | null | undefined, b: readonly number[] | null | undefined): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 /** The real slices under test, and their readbacks. */
 export interface NativeInteractionsHostConformanceSetup {
@@ -144,33 +173,117 @@ export function nativeInteractionsHostConformanceCases(): NativeInteractionsHost
       }
     }),
     hostCase("input/the ray and cursor are drawn exactly as told", ({ input, testHost }, name) => {
-      // The binding decides the ray and cursor per source (the near-pointer
-      // rule) and hands the host the result; a host that draws its own ray
-      // or a cursor at every ray hit fails here, as the Quest host did when
-      // it kept the cursor on a touched object.
+      // The binding decides the ray and cursor per source (the arbiter under
+      // the app's pointer display) and hands the host the resolved drawing; a
+      // host that draws its own ray, a cursor at every ray hit, or applies a
+      // display mode of its own fails here, as the Quest host did when it kept
+      // the cursor on a touched object and later drew the ray by a shell hook.
       if (typeof input.applyPointerVisuals !== "function") {
         fail(name, "the host has no applyPointerVisuals, so it cannot hide the ray while a hand touches something");
       }
       if (typeof testHost.pointerVisuals !== "function") {
         fail(name, "the test host has no pointerVisuals readback");
       }
-      const touched: PointerVisuals = { sourceId: "rc-kit-source", activePointer: "touch", ray: false, cursor: true, cursorPoint: [0, 1, -0.9] };
+      const touched = told("rc-kit-source", { activePointer: "touch", ray: false, cursor: true, cursorPoint: [0, 1, -0.9], targetKind: "object", targetId: "rc-kit-target", hitDistance: 0.01 });
       input.applyPointerVisuals("rc-kit-source", { ...touched });
       const drawn = testHost.pointerVisuals("rc-kit-source");
-      if (!drawn || drawn.ray || !drawn.cursor || JSON.stringify(drawn.cursorPoint) !== JSON.stringify(touched.cursorPoint)) {
+      if (!drawn || drawn.ray || !drawn.cursor || !samePoint(drawn.cursorPoint, touched.cursorPoint)) {
         fail(name, `told ${JSON.stringify(touched)}, the host draws ${JSON.stringify(drawn)}`);
       }
-      if (!testHost.cursors().some((point) => JSON.stringify(point) === JSON.stringify(touched.cursorPoint))) {
+      if (!testHost.cursors().some((point) => samePoint(point, touched.cursorPoint))) {
         fail(name, "the host draws no cursor disc at the point it was told");
       }
-      const idle: PointerVisuals = { sourceId: "rc-kit-source", activePointer: null, ray: true, cursor: false, cursorPoint: null };
+      const idle = told("rc-kit-source", { ray: true });
       input.applyPointerVisuals("rc-kit-source", { ...idle });
       const after = testHost.pointerVisuals("rc-kit-source");
       if (!after || !after.ray || after.cursor) {
         fail(name, `told ${JSON.stringify(idle)}, the host draws ${JSON.stringify(after)}`);
       }
-      if (testHost.cursors().some((point) => JSON.stringify(point) === JSON.stringify(touched.cursorPoint))) {
+      if (testHost.cursors().some((point) => samePoint(point, touched.cursorPoint))) {
         fail(name, "the host still draws the cursor disc after being told to stop");
+      }
+      // A cursor on a PANEL arrives through the same member: the host draws
+      // it where told, and never needs a stopgap of its own for panels.
+      const onPanel = told("rc-kit-source", { activePointer: "ray", ray: true, rayTo: 0.3, cursor: true, cursorPoint: [0.2, 1.2, -0.8], targetKind: "panel", targetId: "rc-kit-panel", hitDistance: 0.8 });
+      input.applyPointerVisuals("rc-kit-source", { ...onPanel });
+      const panel = testHost.pointerVisuals("rc-kit-source");
+      if (!panel || !panel.cursor || !samePoint(panel.cursorPoint, onPanel.cursorPoint)) {
+        fail(name, `told a cursor on a panel ${JSON.stringify(onPanel)}, the host draws ${JSON.stringify(panel)}`);
+      }
+      if (!testHost.cursors().some((point) => samePoint(point, onPanel.cursorPoint))) {
+        fail(name, "the host draws no cursor disc on the panel it was told about");
+      }
+      // The ray told off stays off whatever the host might prefer to show.
+      const rayOff = told("rc-kit-source", { activePointer: "ray", ray: false, cursor: true, cursorPoint: [0, 1, -1.5], targetKind: "object", targetId: "rc-kit-target", hitDistance: 1.5 });
+      input.applyPointerVisuals("rc-kit-source", { ...rayOff });
+      const off = testHost.pointerVisuals("rc-kit-source");
+      if (!off || off.ray) fail(name, "told to draw no ray while the ray hits an object (the app's display says never), the host still draws one");
+      input.applyPointerVisuals("rc-kit-source", { ...told("rc-kit-source", {}) });
+    }),
+    hostCase("input/the pointer display is the app's: the binding resolves it and the host draws what it is handed", ({ input, interactions, testHost }, name) => {
+      // Two setups with opposite ray settings over the same live sources:
+      // what the host draws for every source must be exactly the binding's
+      // drawing each time. A host with a display mode of its own (a shell
+      // hook, a default of "always") disagrees on one of the two.
+      if (typeof input.applyPointerVisuals !== "function" || typeof testHost.pointerVisuals !== "function") {
+        fail(name, "the host has no applyPointerVisuals or no pointerVisuals readback");
+      }
+      for (const ray of ["never", "always"] as const) {
+        const setup = new NativeInteractions({ input, interactions, pointerDisplay: { ray } });
+        try {
+          if (typeof testHost.pointerDisplay === "function") {
+            const received = testHost.pointerDisplay();
+            if (received?.ray !== ray) fail(name, `the host received pointer display ${JSON.stringify(received)} after the binding was configured with ray "${ray}"`);
+          }
+          setup.update(1 / 72);
+          for (const source of input.sample()) {
+            const decided = setup.runtime.getPointerDrawing(source.id);
+            const drawn = testHost.pointerVisuals(source.id);
+            if (!decided || !drawn) fail(name, `the binding decided ${String(JSON.stringify(decided))} for source "${source.id}" and the host draws ${String(JSON.stringify(drawn))}: a sampled source gets a drawing, and the host keeps it`);
+            // With ray "never" the binding decides no ray, so a host that still draws one differs here.
+            if (drawn.ray !== decided.ray || drawn.cursor !== decided.cursor || !samePoint(drawn.cursorPoint, decided.cursorPoint) || Math.abs(drawn.rayTo - decided.rayTo) > 1e-9) {
+              fail(name, `with ray "${ray}", the binding decided ${JSON.stringify(decided)} for "${source.id}" and the host draws ${JSON.stringify(drawn)}`);
+            }
+          }
+        } finally {
+          setup.dispose();
+        }
+      }
+    }),
+    hostCase("input/a hand's select is 0 or 1 (the runtime's pinch gesture) and its squeeze is 0", ({ input }, name) => {
+      // The web gives IWSDK a binary pinch (the browser's selectstart and
+      // selectend); a host that reports the analog pinch strength, or the
+      // grasp as squeeze, holds a grab open on a relaxed hand. Run with hands
+      // tracked; a session with controllers only has nothing to check here.
+      for (const source of input.sample()) {
+        if (source.kind !== "hand") continue;
+        if (source.select !== 0 && source.select !== 1) {
+          fail(name, `hand "${source.id}" reports select ${source.select}; a hand's select is 1 while the runtime reports its pinch gesture and 0 otherwise, never a strength`);
+        }
+        if (source.squeeze !== 0) {
+          fail(name, `hand "${source.id}" reports squeeze ${source.squeeze}; a hand has no squeeze (its grab is its pinch through select), and a grasp value here never releases a grab`);
+        }
+      }
+    }),
+    hostCase("interactions/queries consider registered interactables only: scenery enclosing the hand is never answered", ({ interactions, testHost }, name) => {
+      // A host that answered proximity with any shown mesh found the floor's
+      // bounds around every hand and no fingertip ever reached a target.
+      if (typeof testHost.placeScenery !== "function") fail(name, "the test host has no placeScenery, so the query scope cannot be proved");
+      testHost.clearTargets();
+      try {
+        testHost.placeScenery("rc-kit-floor", [0, 0, -1], 3);
+        testHost.placeScenery("rc-kit-wall", [0, 1, -1.05], 0.02);
+        if (interactions.hitProximity([0, 1, -1], 0.5) !== null) fail(name, "with only scenery placed, hitProximity answered; queries consider registered interactables only");
+        if (interactions.hitRay({ origin: [0, 1, 0], direction: [0, 0, -1] }) !== null) fail(name, "with only scenery placed, hitRay answered");
+        if (interactions.hitCone && interactions.hitCone({ origin: [0, 1, 0], direction: [0, 0, -1] }, (5 * Math.PI) / 180, 30) !== null) fail(name, "with only scenery placed, hitCone answered");
+        testHost.placeTarget("rc-kit-target", [0, 1, -1], 0.1);
+        const near = interactions.hitProximity([0, 1, -0.87], 0.5);
+        if (!near || near.targetId !== "rc-kit-target") fail(name, `a fingertip 3 cm from a target, inside the floor's bounds, must reach the target; got ${JSON.stringify(near)}`);
+        if (Math.abs(near.distance - 0.03) > 0.001) fail(name, `the distance is to the target's surface, 0.03 within 1 mm, got ${near.distance}`);
+        const along = interactions.hitRay({ origin: [0, 1, 0], direction: [0, 0, -1] });
+        if (!along || along.targetId !== "rc-kit-target") fail(name, `a ray through scenery to a target must answer the target; got ${JSON.stringify(along)}`);
+      } finally {
+        testHost.clearTargets();
       }
     }),
     hostCase("interactions/a registered target with no radius is a 10 cm sphere", ({ input, interactions, testHost }, name) => {

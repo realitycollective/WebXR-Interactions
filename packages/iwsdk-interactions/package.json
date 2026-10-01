@@ -9,7 +9,10 @@
     "xr",
     "interaction",
     "input",
-    "typescript"
+    "typescript",
+    "physics",
+    "pointer",
+    "eye-gaze"
   ],
   "license": "MIT",
   "author": "Reality Collective",
@@ -32,7 +35,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-input": "^0.1.7",
+    "@realitycollective/webxr-input": "^0.1.8",
     "@realitycollective/webxr-interactions": "^0.1.1-preview.4"
   },
   "peerDependencies": {
@@ -43,6 +46,7 @@
   "devDependencies": {
     "@iwsdk/core": "1.0.0",
     "@iwsdk/xr-input": "1.0.0",
+    "elics": "3.4.2",
     "three": "npm:super-three@0.181.0",
     "@types/three": "0.181.0"
   },

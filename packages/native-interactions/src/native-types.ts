@@ -26,9 +26,13 @@
  * `[x, y, z, w]`, right handed, +Y up.
  */
 import type {
+  ActivePointerKind,
   HeadPose,
   InputHitHint,
   InputSourceSnapshot,
+  PointerDisplayConfig,
+  PointerDrawing,
+  PointerTargetKind,
   PoseTuple,
   QuatTuple,
   RayTuple,
@@ -41,8 +45,30 @@ import type {
   PhysicsBodyState,
   PhysicsShapeSpec,
   PhysicsVelocity,
-  PointerVisuals,
 } from "@realitycollective/webxr-interactions";
+
+/**
+ * What the host draws for one source this frame: the core's pointer drawing
+ * (`pointerDrawing` in `@realitycollective/webxr-input`: the arbiter's
+ * decision under the app's pointer display settings), plus the decision it
+ * came from, so a host can tell a panel cursor from an object cursor in its
+ * logs. Every field is resolved here. The host draws `ray` and `cursor`
+ * exactly as they are, at the sizes, colours and offsets given, and decides
+ * nothing: not the display mode, not whether a panel gets a cursor, not the
+ * stub's length. Before 29 September 2026 a host had to reach these through
+ * a shell hook of its own (`__rcShell.setPointerDisplay`), which is exactly
+ * the kind of host-side rule this contract forbids.
+ */
+export interface NativePointerVisuals extends PointerDrawing {
+  /** The pointer owning the source, or null when none has a candidate. */
+  activePointer: ActivePointerKind | null;
+  /** What the cursor sits on: a registered interactable, a UI panel, or null. */
+  targetKind: PointerTargetKind | null;
+  /** The interactable id or the panel id the cursor sits on, or null. */
+  targetId: string | null;
+  /** The hit's distance (ray parameter, or surface distance), or null. */
+  hitDistance: number | null;
+}
 
 /**
  * What the host knows about its session, from which this package derives
@@ -105,8 +131,34 @@ export interface NativeInputHost {
   /**
    * This frame's tracked sources, in the `InputSourceSnapshot` shape. `kind`
    * is `"hand"` while hand joints are tracked, else `"controller"`.
-   * `select` is the trigger value, or 1 while the runtime reports selecting
-   * (a hand pinch), 0..1; `squeeze` is the grip value, 0 for hands.
+   *
+   * What a source reports for `select` and `squeeze` is fixed per kind, so
+   * the core's grab lifecycle (start at 0.7, end below 0.3, the same
+   * thresholds IWSDK's provider feeds) sees on this host what it sees on the
+   * web on the same headset:
+   *
+   * - A CONTROLLER: `select` is the trigger's analog value, OpenXR
+   *   `/input/trigger/value` (WebXR `gamepad.buttons[0].value`), and
+   *   `squeeze` the grip's, `/input/squeeze/value` (`buttons[1].value`).
+   *   Both rest at 0.
+   * - A HAND: `select` is BINARY, 1 while the runtime reports the hand's
+   *   pinch gesture and 0 otherwise, NEVER the analog pinch strength. This is
+   *   what the web gives IWSDK: the browser fires `selectstart` and
+   *   `selectend` from the runtime's own pinch recogniser and IWSDK reads
+   *   `getSelecting() ? 1 : 0` (`@iwsdk/xr-input` `xr-input-manager.js`).
+   *   The source on Quest is `XR_FB_hand_tracking_aim`'s
+   *   `XR_HAND_TRACKING_AIM_INDEX_PINCHING_BIT_FB` (the same bit the Quest
+   *   Browser turns into `selectstart`), on a runtime without it
+   *   `XR_EXT_hand_interaction` `pinch_ext/ready_ext` and `pinch_ext/value`
+   *   through the runtime's own threshold. `squeeze` is 0 ALWAYS: a hand has
+   *   no squeeze on the web (IWSDK reads a gamepad squeeze button a hand
+   *   does not have), and its grab is its pinch through `select`. OpenXR's
+   *   `grasp_ext` is not a hand's squeeze; a relaxed hand keeps it above the
+   *   release threshold, so a grab never ends, which is what held the Pale
+   *   Signal handwheel for 7 s after the hand opened. A relaxed, open hand
+   *   reads `select` 0 and `squeeze` 0. The binding forces a hand's `squeeze`
+   *   to 0 whatever the host says; the kit checks a hand's `select` is 0 or 1.
+   *
    * `gripPose` is the WebXR GRIP frame, not a hand joint - see
    * `InputSourceSnapshot.gripPose`. `indexTip` is the index fingertip for a
    * hand and the ray origin for a controller. `hapticsAvailable` is true when
@@ -148,20 +200,35 @@ export interface NativeInputHost {
   applyPresence?(side: "left" | "right", shown: NativePresenceShown): void;
   /**
    * Draw, or stop drawing, one source's ray and cursor, exactly as told.
-   * Decided here by the core near-pointer rule (`near-pointer.ts` in
-   * `@realitycollective/webxr-interactions`, IWSDK's `MultiPointer`): the
-   * ray shows only while the ray owns the source or no pointer does, never
-   * while the fingertip or grip owns it, and never for a source with no ray;
-   * the cursor disc shows exactly while the active pointer has a hit, at
-   * `cursorPoint` (world metres), the ray's hit or the surface point under
-   * the fingertip or grip. A host draws nothing for a source it was not told
-   * about, and never draws "a cursor at every ray hit" on its own, which is
-   * what this contract said before 28 September 2026 and what put a cursor
-   * on a touched object. Called every frame for every sampled source, with
-   * fresh objects the host may keep. IWSDK: `RayPointer.update` with
-   * `forceHideRay` and `CursorVisual.setVisible`.
+   * Decided here: the pointer arbiter (`pointer-arbiter.ts` in
+   * `@realitycollective/webxr-input`, IWSDK's `MultiPointer`) picks the
+   * pointer owning the source across interactables AND UI panels, so a
+   * cursor on a panel arrives here too (`targetKind: "panel"`) and a touch on
+   * a panel hides the ray over an object; then the app's pointer display
+   * settings (`pointer-display.ts`, IWSDK's `RayPointer` and `CursorVisual`
+   * defaults) resolve what is drawn: `ray` with its stub from `rayFrom` to
+   * `rayTo` metres along the source's ray (fully visible to `raySolidTo`,
+   * fading after), `rayRadius` and `rayColor`; `cursor` at `cursorPoint`
+   * (world metres, the ray's hit or the surface point under the fingertip or
+   * grip), a disc of `cursorRadius`, `cursorOpacity`, sitting `cursorOffset`
+   * off the surface along its normal. A host draws nothing for a source it
+   * was not told about, never draws "a cursor at every ray hit" on its own
+   * (what this contract said before 28 September 2026), and never applies a
+   * display mode of its own (what the Pale Signal host did through a shell
+   * hook until 29 September 2026). Called every frame for every sampled
+   * source, with fresh objects the host may keep. IWSDK: `RayPointer.update`
+   * with `forceHideRay`, `rayDisplayMode` and its shader, and
+   * `CursorVisual.setVisible` and `updateFromIntersection`.
    */
-  applyPointerVisuals?(sourceId: string, visuals: PointerVisuals): void;
+  applyPointerVisuals?(sourceId: string, visuals: NativePointerVisuals): void;
+  /**
+   * The app's pointer display settings, handed over at construction and on
+   * every change (`PointerDisplay.set`), so a host can size its meshes or
+   * log the configuration. Informational: every per-frame decision already
+   * arrives resolved in `applyPointerVisuals`, so a host needs nothing from
+   * here to draw correctly. Optional.
+   */
+  applyPointerDisplay?(config: PointerDisplayConfig): void;
 }
 
 /** What the host's ray or proximity query reports: the target it reached, if any. */
@@ -170,7 +237,13 @@ export interface NativeHit {
   targetId: string;
   /** `hitRay`: the ray parameter t, metres. `hitProximity`: metres to the target's SURFACE, never negative. */
   distance: number;
-  /** World-space hit point, or the target's centre. */
+  /**
+   * World-space point. `hitRay`: where the ray enters the target. `hitProximity`:
+   * the point on the target's SURFACE nearest the query point, never the
+   * centre, because the touch cursor is drawn there (IWSDK's sphere
+   * intersector reports the point on the mesh). A host that answered with
+   * the centre put the cursor inside the object.
+   */
   point: Vec3Tuple;
 }
 
@@ -178,6 +251,16 @@ export interface NativeHit {
  * The native host's `interactions` slice: `HitTester` with its semantics
  * stated, and `TransformPort` with every member keyed by the target id the
  * app chose when it registered the object with the native scene.
+ *
+ * SCOPE OF EVERY QUERY: `hitRay`, `hitProximity` and `hitCone` consider
+ * REGISTERED INTERACTABLES ONLY, the ids this binding handed to
+ * `setTargetRadius`, and among them only the ones shown. Never scenery, a
+ * floor, a wall, a panel or any other mesh, however near. IWSDK's
+ * `EntityHitTester` tests the entities `register` gave it and nothing else.
+ * A host that answered a proximity query with the floor's bounds (which
+ * contain the hand) passed every earlier case and left no fingertip able to
+ * reach a target on the device; the kit now surrounds the query with
+ * scenery and expects the target.
  */
 export interface NativeInteractionHost {
   /**
@@ -345,7 +428,13 @@ export interface NativePhysicsHost {
 export interface NativeInteractionsTestHost {
   /** Put a shown, hit-testable target of `radius` metres at `position`, as the app's scene would. */
   placeTarget(targetId: string, position: Vec3Tuple, radius: number): void;
-  /** Remove every target `placeTarget` put in. */
+  /**
+   * Put a shown mesh of `radius` metres at `position` that is NOT a
+   * registered interactable (a floor, a wall, a prop), through the host's
+   * ordinary scene, so the kit can prove the queries never answer with it.
+   */
+  placeScenery(id: string, position: Vec3Tuple, radius: number): void;
+  /** Remove every target and every piece of scenery placed by the kit. */
   clearTargets(): void;
   /** What the host draws for one side now. */
   presenceShown(side: "left" | "right"): NativePresenceShown | undefined;
@@ -354,7 +443,9 @@ export interface NativeInteractionsTestHost {
   /** Every cursor disc the host draws now, as world positions. */
   cursors(): Vec3Tuple[];
   /** What the host draws for one source now, as last told through `applyPointerVisuals`; undefined for a source never told. */
-  pointerVisuals?(sourceId: string): PointerVisuals | undefined;
+  pointerVisuals?(sourceId: string): NativePointerVisuals | undefined;
+  /** The pointer display settings the host last received through `applyPointerDisplay`, or undefined. Optional. */
+  pointerDisplay?(): PointerDisplayConfig | undefined;
   /** Hide or show a placed target with the host's ordinary visibility flag, for the hidden-target cone case. Optional. */
   setTargetVisible?(targetId: string, visible: boolean): void;
 }

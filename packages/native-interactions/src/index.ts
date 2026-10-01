@@ -18,6 +18,7 @@ export type {
   NativeInteractionHost,
   NativeInteractionsTestHost,
   NativePhysicsHost,
+  NativePointerVisuals,
   NativePresenceShown,
 } from "./native-types.js";
 export * from "./provider.js";

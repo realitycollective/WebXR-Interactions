@@ -21,9 +21,16 @@
  * - **Priority.** Per source, the first of touch, grab, ray with a candidate
  *   is the active pointer (`PRIORITY_ORDER`), and once it is pressing or
  *   grabbing it stays active until the release (IWSDK's selection lock).
+ *   Since 29 September 2026 that decision is made ONCE per source across
+ *   interactables and UI panels by the `PointerArbiter` in
+ *   `@realitycollective/webxr-input` (`pointer-arbiter.ts`), which this
+ *   runtime feeds and reads; `POINTER_PRIORITY`, `pickActivePointer`,
+ *   `PointerCandidate` and `PointerVisuals` live there and are re-exported
+ *   here unchanged.
  * - **Visuals.** The ray and its cursor show only while the ray is the active
  *   pointer or nothing is (`shouldHideRay`); a near pointer owning the hand
- *   hides them, and the shared cursor sits at the active pointer's hit point.
+ *   hides them, and the shared cursor sits at the active pointer's hit. What
+ *   the app then shows of them is its `PointerDisplay` configuration.
  *
  * One rule is deliberately stricter than the template, as the Pale Signal
  * work order of 28 September 2026 required: a touch never presses from inside
@@ -33,12 +40,14 @@
  * press on that first frame; `touch-reference.test.ts` records the one frame
  * on which the two differ, and that they agree everywhere else.
  */
-
-/** The pointer that owns a source this frame. `"gaze"` is the eye-gaze source's own pointer. */
-export type ActivePointerKind = "touch" | "grab" | "ray" | "gaze";
-
-/** IWSDK's order: the first with a candidate wins. `multi-pointer.js` `PRIORITY_ORDER`. */
-export const POINTER_PRIORITY: readonly ActivePointerKind[] = Object.freeze(["touch", "grab", "ray"]);
+export {
+  POINTER_PRIORITY,
+  pickActivePointer,
+  pointerVisualsFor,
+  type ActivePointerKind,
+  type PointerCandidate,
+  type PointerVisuals,
+} from "@realitycollective/webxr-input";
 
 export interface NearPointerOptions {
   /** Surface distance, metres, within which a fingertip starts hovering a target. IWSDK `enterHoverDistance` 0.15. */
@@ -140,70 +149,4 @@ export class TouchPointerState {
     this.pressed = false;
     this.armed = false;
   }
-}
-
-/** A candidate one pointer found: the target and the point the cursor sits at. */
-export interface PointerCandidate {
-  targetId: string;
-  /** World-space point: the ray's hit, or the closest point of a near target. */
-  point: readonly [number, number, number];
-  /** Metres: the ray parameter for a ray, the surface distance for a near pointer. */
-  distance: number;
-}
-
-/**
- * IWSDK's `pickActiveByPriority` with its selection lock: while the current
- * active pointer is selecting it stays; otherwise the first pointer in
- * `POINTER_PRIORITY` with a candidate wins, or none.
- */
-export function pickActivePointer(
-  candidates: { touch: boolean; grab: boolean; ray: boolean },
-  current: ActivePointerKind | null,
-  selecting: boolean,
-): ActivePointerKind | null {
-  if (selecting && current !== null) return current;
-  for (const kind of POINTER_PRIORITY) {
-    if (candidates[kind as "touch" | "grab" | "ray"]) return kind;
-  }
-  return null;
-}
-
-/**
- * What a binding shows for one source: IWSDK's `shouldHideRay` and the shared
- * cursor from `MultiPointer.update`. A host draws exactly this and decides
- * nothing.
- */
-export interface PointerVisuals {
-  /** The source these visuals belong to. */
-  sourceId: string;
-  /** The pointer owning the source, or null when none has a candidate. */
-  activePointer: ActivePointerKind | null;
-  /**
-   * Draw this source's ray. True while the source has a ray and no near
-   * pointer owns it: the ray is active, or nothing is. False while touch or
-   * grab owns the hand, while eye gaze has taken the far ray, and for a
-   * source with no ray at all.
-   */
-  ray: boolean;
-  /**
-   * Draw the cursor disc at `cursorPoint`. True exactly while the active
-   * pointer has a candidate: at the ray's hit, or on the surface the
-   * fingertip or grip reaches. Never drawn "at every ray hit" regardless of
-   * ownership, which is what the September 2026 native contract said.
-   */
-  cursor: boolean;
-  /** World-space cursor position while `cursor` is true, else null. */
-  cursorPoint: readonly [number, number, number] | null;
-}
-
-/** Build the visuals for one source from its active pointer and that pointer's candidate. */
-export function pointerVisualsFor(
-  sourceId: string,
-  hasRay: boolean,
-  active: ActivePointerKind | null,
-  candidate: PointerCandidate | null,
-): PointerVisuals {
-  const ray = hasRay && (active === null || active === "ray");
-  const cursor = active !== null && candidate !== null;
-  return { sourceId, activePointer: active, ray, cursor, cursorPoint: cursor ? candidate!.point : null };
 }

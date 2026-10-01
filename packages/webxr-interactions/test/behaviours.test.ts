@@ -159,7 +159,7 @@ describe("GrabBehaviour (poseOnly)", () => {
     expect(grab.getValue()).toBe(0);
   });
 
-  it("suspends physics on grab start and resumes it with the source's release velocity on grab end", () => {
+  it("suspends physics on grab start and resumes it with the object's velocity over the last physics step on grab end", () => {
     const grab = new GrabBehaviour({}, "poseOnly");
     const t = new FakeTransform();
     const { context } = ctx(t);
@@ -170,14 +170,36 @@ describe("GrabBehaviour (poseOnly)", () => {
     grab.onGrabStart(context, holder);
     expect(t.holdStarts).toBe(1);
     expect(t.held).toBe(true);
+    // Two frames of carry at 1/60 s: 1.2 m/s up. The source's own reported
+    // velocity is NOT the rule: the object's motion is.
+    grab.update(context, { ...holder, gripPose: { position: [0, 1.02, -0.4], quaternion: [0, 0, 0, 1] } });
+    grab.update(context, { ...holder, gripPose: { position: [0, 1.04, -0.4], quaternion: [0, 0, 0, 1] } });
     const released: InteractorInfo = {
       ...holder,
+      gripPose: { position: [0, 1.04, -0.4], quaternion: [0, 0, 0, 1] },
       linearVelocity: [1, 2, 3],
       angularVelocity: [0, 0.5, 0],
     };
     grab.onGrabEnd(context, released);
     expect(t.held).toBe(false);
-    expect(t.releases).toEqual([{ linearVelocity: [1, 2, 3], angularVelocity: [0, 0.5, 0] }]);
+    expect(t.releases).toHaveLength(1);
+    expect(t.releases[0]!.linearVelocity[1]).toBeCloseTo(1.2, 6);
+    expect(t.releases[0]!.linearVelocity[0]).toBeCloseTo(0, 6);
+    expect(t.releases[0]!.angularVelocity).toEqual([0, 0, 0]);
+  });
+
+  it("a hold that never moved, or was released the frame it started, throws nothing", () => {
+    const grab = new GrabBehaviour({}, "poseOnly");
+    const t = new FakeTransform();
+    const { context } = ctx(t);
+    const holder: InteractorInfo = { ...interactor, gripPose: { position: [0, 1, -0.4], quaternion: [0, 0, 0, 1] } };
+    grab.onGrabStart(context, holder);
+    grab.onGrabEnd(context, { ...holder, linearVelocity: [5, 5, 5] });
+    expect(t.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
+    // No grip at all: nothing recorded, still zeros.
+    grab.onGrabStart(context, interactor);
+    grab.onGrabEnd(context, interactor);
+    expect(t.releases[1]).toEqual({ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] });
   });
 
   it("releases with zero velocity when the interactor carries none - a synthesized release", () => {
@@ -191,7 +213,8 @@ describe("GrabBehaviour (poseOnly)", () => {
     grab.onGrabStart(context, holder);
     // A synthesized release (source lost / target unregistered / runtime
     // disposed) hands the behaviour an InteractorInfo with no velocity.
-    grab.onGrabEnd(context, { id: holder.id, kind: "other", select: 0, squeeze: 0 });
+    grab.update(context, { ...holder, gripPose: { position: [0, 1.5, -0.4], quaternion: [0, 0, 0, 1] } });
+    grab.onGrabEnd(context, { id: holder.id, kind: "other", select: 0, squeeze: 0, synthesized: true });
     expect(t.releases).toEqual([{ linearVelocity: [0, 0, 0], angularVelocity: [0, 0, 0] }]);
   });
 

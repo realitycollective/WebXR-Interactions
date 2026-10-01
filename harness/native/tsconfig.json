@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": [],
+    "paths": {
+      "@realitycollective/webxr-interactions": ["../../packages/webxr-interactions/src/index.ts"],
+      "@realitycollective/native-interactions": ["../../packages/native-interactions/src/index.ts"],
+      "@realitycollective/threejs-interactions": ["../../packages/threejs-interactions/src/index.ts"]
+    }
+  },
+  "include": ["entry.ts", "src/**/*.ts", "scene-assets.ts", "../../demos/playground/src/scene.ts", "../../demos/playground/src/stations-three.ts", "../../packages/native-interactions/test/helpers.ts"]
+}

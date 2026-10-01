@@ -32,7 +32,11 @@ describe("ThreeHitTester proximity", () => {
 
     const hit = tester.hitProximity([2.15, 1, -3], 0.05);
     expect(hit?.interactableId).toBe("box");
-    expect(hit?.point).toEqual([2, 1, -3]);
+    // The point is the surface nearest the probe: the world centre moved one
+    // scaled bounding radius (a 0.1 m box's 0.05 * sqrt(3), times 2) toward it, never [1, 1, 1].
+    expect(hit?.point[0]).toBeCloseTo(2 + 0.05 * Math.sqrt(3) * 2, 6);
+    expect(hit?.point[1]).toBeCloseTo(1, 6);
+    expect(hit?.point[2]).toBeCloseTo(-3, 6);
   });
 
   it("scales the bounding radius by the world scale, parent included", () => {

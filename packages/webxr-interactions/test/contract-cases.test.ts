@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  surfacePointOnSphere,
   hitTesterContractCases,
   transformPortContractCases,
   type HitTester,
@@ -65,6 +66,8 @@ interface HitTesterFakeConfig {
   blindProximity?: boolean;
   /** hitProximity finds a target however far the query point is. */
   greedyProximity?: boolean;
+  /** hitProximity reports the target's centre as its point, not the surface point nearest the query. */
+  centrePoint?: boolean;
   /** hitRay keeps the first target it finds along a ray, not the nearest. */
   pickFarther?: boolean;
   /** Hands back the target's own stored position as the hit point. */
@@ -176,7 +179,8 @@ class FakeHitTesterHost implements HitTester {
       const surface = Math.max(0, centre - target.radius);
       if (this.config.greedyProximity || surface <= radius) {
         const distance = this.config.centreDistance ? centre : surface;
-        return { interactableId: id, distance, point: this.pointOf(target.position) };
+        const at = this.config.centrePoint ? target.position : surfacePointOnSphere(target.position, target.radius, point);
+        return { interactableId: id, distance, point: this.pointOf(at) };
       }
     }
     return null;
@@ -226,6 +230,14 @@ describe("hitTesterContractCases", () => {
 });
 
 describe("hitTesterContractCases catches a broken host", () => {
+  it("rejects a host whose proximity point is the centre, not the surface point nearest the query (INT-G7 near cursor)", () => {
+    expect(() =>
+      runHitTesterCase("hitProximity's point is the surface point nearest the query point, never the centre", {
+        centrePoint: true,
+      }),
+    ).toThrow(/the proximity point\[0\] must be close to 0\.1, got 0/);
+  });
+
   it("rejects a host that measures proximity to the centre, not the surface", () => {
     expect(() =>
       runHitTesterCase("hitProximity reports the distance to the target's SURFACE, clamped at zero", {

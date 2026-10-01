@@ -15,6 +15,7 @@
  */
 import type { RayTuple, Vec3Tuple } from "@realitycollective/webxr-input";
 import {
+  surfacePointOnSphere,
   coneHitForSpheres,
   rayPointDistance,
   type HitTester,
@@ -126,7 +127,8 @@ export class BabylonHitTester implements HitTester {
       const distance =
         Math.hypot(at[0] - point[0], at[1] - point[1], at[2] - point[2]) - targetRadius;
       if (distance <= radius && (best === null || distance < best.distance)) {
-        best = { interactableId: id, distance: Math.max(0, distance), point: at };
+        // The surface point nearest the fingertip, where the touch cursor sits.
+        best = { interactableId: id, distance: Math.max(0, distance), point: surfacePointOnSphere(at, targetRadius, point) };
       }
     }
     return best;

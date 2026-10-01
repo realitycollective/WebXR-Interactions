@@ -19,9 +19,13 @@ import {
   type PhysicsBodySpec,
   type PhysicsFacility,
   type PhysicsShapeSpec,
+  type PointerArbiter,
+  type PointerDisplay,
+  type PointerDisplayConfig,
 } from "@realitycollective/webxr-interactions";
 import { ThreeHitTester } from "./hit-tester.js";
 import { RapierPhysicsFacility, type AnyRapierModule } from "./physics-facility.js";
+import { ThreePointerVisuals } from "./pointer-visuals.js";
 import { ThreeTransformPort } from "./transform-port.js";
 import { WebXRInputProvider, type WebXRProviderContext } from "./webxr-provider.js";
 
@@ -29,6 +33,27 @@ export interface ThreeInteractionsOptions extends WebXRProviderContext {
   dwellDefaults?: DwellConfig;
   /** The near-pointer distances (touch hover, touch press, grab radius). Defaults are IWSDK 1.0.0's. */
   nearPointer?: Partial<NearPointerOptions>;
+  /**
+   * The pointer arbiter shared with the UI Extensions window host
+   * (`connectUIExtensions({ pointers })`), so one decision per source covers
+   * panels and interactables, as IWSDK's `MultiPointer` does. Omit when the
+   * app has no panels.
+   */
+  pointers?: PointerArbiter;
+  /**
+   * The app's pointer display settings: ray never, always or while hitting;
+   * cursors on objects and on panels; the ray and cursor look. Defaults are
+   * IWSDK 1.0.0's. Change them at run time through
+   * `runtime.getPointerDisplay().set(...)`.
+   */
+  pointerDisplay?: PointerDisplay | Partial<PointerDisplayConfig>;
+  /**
+   * Draw the ray stub and the cursor disc for every source, IWSDK's look,
+   * into this scene (or any world-space root), exactly as the core decides
+   * them each frame. Omit to draw nothing (an app that draws its own reads
+   * `runtime.onPointerDrawing`).
+   */
+  pointerVisuals?: { scene: Object3D };
   /**
    * The platform's physics. The default engine for three.js is Rapier:
    * pass `{ rapier }`, the initialised `@dimforge/rapier3d-compat` module
@@ -69,6 +94,8 @@ export class ThreeInteractions {
   private readonly stepPhysics: boolean;
   private readonly ports = new Map<string, ThreeTransformPort>();
   private readonly objects = new Map<string, Object3D>();
+  /** The ray and cursor renderer, when the setup asked for one. */
+  readonly pointerVisuals: ThreePointerVisuals | null;
 
   constructor(options: ThreeInteractionsOptions) {
     this.provider = new WebXRInputProvider(options);
@@ -78,7 +105,12 @@ export class ThreeInteractions {
       hitTester: this.hitTester,
       ...(options.dwellDefaults ? { dwellDefaults: options.dwellDefaults } : {}),
       ...(options.nearPointer ? { nearPointer: options.nearPointer } : {}),
+      ...(options.pointers ? { pointers: options.pointers } : {}),
+      ...(options.pointerDisplay ? { pointerDisplay: options.pointerDisplay } : {}),
     });
+    this.pointerVisuals = options.pointerVisuals
+      ? new ThreePointerVisuals({ scene: options.pointerVisuals.scene, runtime: this.runtime })
+      : null;
     this.physics = options.physics
       ? "rapier" in options.physics
         ? new RapierPhysicsFacility(options.physics.rapier, { objectFor: (id) => this.objects.get(id) })
@@ -140,6 +172,7 @@ export class ThreeInteractions {
   }
 
   dispose(): void {
+    this.pointerVisuals?.dispose();
     this.runtime.dispose();
     this.provider.dispose();
     this.physics?.dispose();

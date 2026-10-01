@@ -1,247 +1,171 @@
 /**
- * The independent interaction playground - a client of the standalone
- * three.js adapter. No framework: raw WebXR + three.js.
+ * Playground entry.
  *
- * Client responsibilities demonstrated on purpose:
- *  - AUDIO: WebAudio blips realised from feedback intents (the framework
- *    only emits intents - the client owns sound).
- *  - HAPTICS: routed to controller actuators via the explicit
- *    `routeHapticsToProvider` opt-in (no-ops on hands).
- *  - PHYSICS: the toss ball's flight after release is CLIENT ballistics -
- *    physics is a property of the object in space, not of the interaction
- *    layer.
+ * One scene on IWSDK, three.js, XR Blocks and Babylon, with the same
+ * registrations and the same client on each. This page detects the platform
+ * from the user agent, pre-selects it on a launch screen, and boots nothing
+ * until START is pressed. Each platform is a dynamic import, so a session only
+ * downloads the engine it launches.
+ *
+ * `?engine=iwsdk|threejs|xrblocks|babylon` pre-selects one. Adding
+ * `&autostart=1` skips the launch screen and boots it at once.
  */
-import {
-  Color,
-  DirectionalLight,
-  HemisphereLight,
-  Mesh,
-  MeshStandardMaterial,
-  PerspectiveCamera,
-  PlaneGeometry,
-  Scene,
-  Vector3,
-  WebGLRenderer,
-} from "three";
-import {
-  createThreeInteractions,
-  routeHapticsToProvider,
-} from "@realitycollective/threejs-interactions";
-import * as horizonKit from "@pmndrs/uikit-horizon";
-import {
-  applyScene,
-  cameraHeadPoseSource,
-  configureRendererForUikit,
-  DesktopControls,
-  UixWindowHost,
-} from "@realitycollective/xrblocks-uiextensions";
-import {
-  buildStations,
-  PLAYGROUND_DESCRIPTOR,
-  STATION_INFO,
-  STATION_PANELS,
-} from "./stations.js";
 
-const container = document.getElementById("scene-container") as HTMLDivElement;
+type Engine = "iwsdk" | "threejs" | "xrblocks" | "babylon";
 
-const scene = new Scene();
-scene.background = new Color(0x10141b);
-scene.add(new HemisphereLight(0xdfeaff, 0x202830, 1.0));
-const key = new DirectionalLight(0xffffff, 1.2);
-key.position.set(2, 4, 1);
-scene.add(key);
-
-const floor = new Mesh(
-  new PlaneGeometry(20, 20),
-  new MeshStandardMaterial({ color: new Color(0x181e28), roughness: 0.9 }),
-);
-floor.rotation.x = -Math.PI / 2;
-scene.add(floor);
-
-// DesktopControls owns the camera pose off-headset, so no start position is set
-// here - it is passed to the controls below instead.
-const camera = new PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
-
-const renderer = new WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(devicePixelRatio);
-renderer.xr.enabled = true;
-// Required by uikit: renderOrder-based transparent sorting and local clipping.
-// Without it, panel text sorts behind its own panel at some angles.
-configureRendererForUikit(renderer);
-container.appendChild(renderer.domElement);
-addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
-
-// --- Desktop camera ----------------------------------------------------------
-// The SAME controls the UI Extensions demos use, so both playgrounds steer
-// identically: WASD/arrows walk, Shift sprints, Space jumps, C crouches and
-// right-drag looks. The left button is deliberately left alone for interaction.
-const controls = new DesktopControls(camera, {
-  domElement: renderer.domElement,
-  start: [0, 0.9],
-});
-// The stations sit at roughly a metre, below standing eye height, so a level
-// start pitch puts them all in the bottom of the frame. Tilt down a little.
-controls.pitch = -0.2;
-
-// --- Station description panels ----------------------------------------------
-// Real UI Extensions windows, not bespoke labels: the same window host, chrome
-// and docking the UI Extensions playground uses.
-const panels = new UixWindowHost({
-  scene,
-  headPose: cameraHeadPoseSource(camera),
-  kit: horizonKit as never,
-});
-panels.onPanelReady(({ id, panel }) => {
-  const info = STATION_INFO[id];
-  if (!info) return;
-  panel.getElementById("body")?.setProperties({ text: info.body });
-  panel.getElementById("hint")?.setProperties({ text: info.hint });
-});
-applyScene(panels, STATION_PANELS);
-
-// --- Stations + interactions -------------------------------------------------
-const stations = buildStations();
-scene.add(stations.root);
-
-const interactions = createThreeInteractions({
-  xr: renderer.xr,
-  camera,
-  domElement: renderer.domElement,
-  // The stations sit roughly a metre out on the ring, which is where the
-  // desktop fallback should place its synthetic grip for the levers to swing
-  // at a sensible rate.
-  desktopGripDistance: 0.95,
-});
-for (const interactable of PLAYGROUND_DESCRIPTOR.interactables) {
-  const object = stations.objects.get(interactable.id);
-  if (object) interactions.register(interactable, object);
+interface ModeInfo {
+  title: string;
+  blurb: string;
 }
 
-// --- Client feedback: audio blips + haptics ----------------------------------
-const audio = new AudioContext();
-function blip(frequency: number, duration = 0.08, gainValue = 0.12): void {
-  if (audio.state === "suspended") void audio.resume();
-  const oscillator = audio.createOscillator();
-  const gain = audio.createGain();
-  oscillator.frequency.value = frequency;
-  gain.gain.setValueAtTime(gainValue, audio.currentTime);
-  gain.gain.exponentialRampToValueAtTime(1e-4, audio.currentTime + duration);
-  oscillator.connect(gain).connect(audio.destination);
-  oscillator.start();
-  oscillator.stop(audio.currentTime + duration);
-}
-
-const CUE_TONES: Record<string, number> = {
-  actuate: 660,
-  release: 440,
-  grab: 520,
-  drop: 380,
-  score: 880,
-  dwellComplete: 990,
+const MODES: Record<Engine, ModeInfo> = {
+  iwsdk: {
+    title: "Meta - IWSDK",
+    blurb: "The reference. IWSDK's own pointers and grab, with panels (mouse works; VR on a Quest).",
+  },
+  threejs: {
+    title: "three.js",
+    blurb: "Raw WebXR and three.js with the standalone binding, mouse on desktop, panels included.",
+  },
+  xrblocks: {
+    title: "Google - XR Blocks",
+    blurb: "A Script inside XR Blocks (Android XR, or its desktop simulator), panels included.",
+  },
+  babylon: {
+    title: "Babylon.js",
+    blurb: "Babylon.js with the Babylon binding. No panels: UI Extensions has no Babylon binding yet.",
+  },
 };
 
-interactions.runtime.onFeedback((intent) => {
-  const tone = CUE_TONES[intent.cue];
-  if (tone) blip(tone);
-});
-// Haptics: explicit client opt-in; silently no-ops on hands.
-routeHapticsToProvider(
-  (listener) => interactions.runtime.onFeedback(listener),
-  interactions.provider,
-);
+const ENGINE_PARAM = "engine";
+const AUTOSTART_PARAM = "autostart";
 
-// --- Gaze-dwell ring visual ---------------------------------------------------
-interactions.runtime.onEvent((event) => {
-  if (event.type === "dwellProgress" && event.interactableId === "pg-gaze-button") {
-    stations.dwellRing.scale.setScalar(Math.max(0.001, event.value ?? 0));
+function isEngine(value: string | null): value is Engine {
+  return value !== null && value in MODES;
+}
+
+/** Pure chooser: the query string wins, then the user agent, then three.js. */
+function chooseEngine(userAgent: string, search: string): { engine: Engine; reason: string; overridden: boolean } {
+  const override = new URLSearchParams(search).get(ENGINE_PARAM);
+  if (isEngine(override)) return { engine: override, reason: `forced by ?${ENGINE_PARAM}=${override}`, overridden: true };
+  if (/OculusBrowser|Meta Quest|Horizon OS/i.test(userAgent)) {
+    return { engine: "iwsdk", reason: "Meta Horizon OS browser detected", overridden: false };
   }
-});
-
-// --- Client ballistics for the toss ball -------------------------------------
-const ball = stations.objects.get("pg-ball") as Mesh;
-const ballPort = interactions.getPort("pg-ball")!;
-const ballVelocity = new Vector3();
-const previous = new Vector3();
-const current = new Vector3();
-let ballHeld = false;
-let ballFlying = false;
-
-interactions.runtime.onEvent((event) => {
-  if (event.interactableId !== "pg-ball") return;
-  if (event.type === "grabStart") {
-    ballHeld = true;
-    ballFlying = false;
-    ball.getWorldPosition(previous);
-  } else if (event.type === "grabEnd") {
-    ballHeld = false;
-    ballFlying = true; // velocity carries over from the last held frames
+  if (/Android\s?XR/i.test(userAgent)) {
+    return { engine: "xrblocks", reason: "Android XR browser detected", overridden: false };
   }
-});
+  return { engine: "threejs", reason: "no headset signature - plain three.js with mouse controls", overridden: false };
+}
 
-function updateBall(dt: number): void {
-  if (ballHeld) {
-    ball.getWorldPosition(current);
-    if (dt > 0) ballVelocity.copy(current).sub(previous).divideScalar(dt);
-    previous.copy(current);
-    return;
+const choice = chooseEngine(navigator.userAgent, location.search);
+const container = document.getElementById("scene-container") as HTMLDivElement;
+
+async function boot(engine: Engine): Promise<void> {
+  const badge = document.getElementById("engine-badge");
+  if (badge) {
+    badge.textContent = `engine: ${engine} - ${MODES[engine].title}`;
+    badge.style.display = "block";
   }
-  if (!ballFlying) return;
-  ballVelocity.y -= 9.81 * dt;
-  ball.position.addScaledVector(ballVelocity, dt);
-  if (ball.position.y < 0.06 || ball.position.length() > 15) {
-    ballFlying = false;
-    ballVelocity.set(0, 0, 0);
-    ball.position.set(...stations.ballHome);
-    ball.quaternion.identity();
-    ballPort.recaptureRest();
+  switch (engine) {
+    case "iwsdk":
+      return (await import("./platforms/iwsdk.js")).boot(container);
+    case "xrblocks":
+      return (await import("./platforms/xrblocks.js")).boot(container);
+    case "babylon":
+      return (await import("./platforms/babylon.js")).boot(container);
+    default:
+      return (await import("./platforms/threejs.js")).boot(container);
   }
 }
 
-// --- Score counter (DOM overlay, also useful on desktop) ----------------------
-const hud = document.createElement("div");
-hud.style.cssText =
-  "position:fixed;top:12px;left:12px;color:#9fd;font:14px system-ui;z-index:10;user-select:none";
-hud.textContent =
-  "score 0 - WASD walk, Shift run, Space jump, C crouch, right-drag look, left-click/drag to work a station";
-document.body.appendChild(hud);
-interactions.runtime.onEvent((event) => {
-  if (event.type === "scored") hud.textContent = `score ${event.value}`;
-});
+function showLaunchScreen(): void {
+  const overlay = document.createElement("div");
+  overlay.id = "launch-overlay";
+  overlay.setAttribute(
+    "style",
+    "position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;" +
+      "align-items:center;justify-content:center;gap:18px;padding:24px;" +
+      "background:#0b1016;color:#dce9f7;font-family:system-ui,sans-serif;text-align:center;",
+  );
 
-// --- Enter VR ------------------------------------------------------------------
-const enter = document.createElement("button");
-enter.textContent = "Enter VR";
-enter.style.cssText =
-  "position:fixed;bottom:16px;left:50%;transform:translateX(-50%);padding:10px 24px;" +
-  "font:16px system-ui;background:#1e2836;color:#cfe;border:1px solid #345;border-radius:8px;z-index:10";
-document.body.appendChild(enter);
-enter.addEventListener("click", () => {
-  void (async () => {
-    if (!navigator.xr) return;
-    const session = await navigator.xr.requestSession("immersive-vr", {
-      optionalFeatures: ["local-floor", "hand-tracking"],
+  let selected: Engine = choice.engine;
+  const cardById = new Map<Engine, HTMLButtonElement>();
+
+  const heading = document.createElement("h1");
+  heading.textContent = "WebXR Interactions - Playground";
+  heading.setAttribute("style", "margin:0;font-size:22px;");
+
+  const detected = document.createElement("p");
+  detected.textContent = `Detected: ${MODES[choice.engine].title} (${choice.reason})`;
+  detected.setAttribute("style", "margin:0;max-width:640px;font-size:13px;color:#9fb8d4;");
+
+  const cards = document.createElement("div");
+  cards.setAttribute("style", "display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:820px;");
+
+  const paint = () => {
+    for (const [engine, card] of cardById) {
+      card.style.borderColor = engine === selected ? "#7db8ff" : "#2e4a66";
+      card.style.background = engine === selected ? "#16283c" : "#101a26";
+    }
+  };
+
+  for (const engine of Object.keys(MODES) as Engine[]) {
+    const mode = MODES[engine];
+    const card = document.createElement("button");
+    card.setAttribute(
+      "style",
+      "width:240px;padding:14px;border-radius:10px;border:2px solid #2e4a66;" +
+        "background:#101a26;color:inherit;cursor:pointer;text-align:left;font:inherit;",
+    );
+    const title = document.createElement("b");
+    title.textContent = mode.title;
+    const blurb = document.createElement("span");
+    blurb.textContent = mode.blurb;
+    blurb.setAttribute("style", "font-size:12px;color:#9fb8d4");
+    card.append(title, document.createElement("br"), blurb);
+    card.addEventListener("click", () => {
+      selected = engine;
+      paint();
     });
-    await renderer.xr.setSession(session);
-  })();
-});
-if (!navigator.xr) enter.textContent = "WebXR unavailable - desktop mouse mode";
+    cardById.set(engine, card);
+    cards.appendChild(card);
+  }
+  paint();
 
-// --- Frame loop -----------------------------------------------------------------
-let last = performance.now();
-renderer.setAnimationLoop(() => {
-  const now = performance.now();
-  const dt = Math.min(0.1, (now - last) / 1000);
-  last = now;
-  // In a session the headset owns the camera pose, so the desktop controls must
-  // not fight it for the transform.
-  if (!renderer.xr.isPresenting) controls.update(dt);
-  panels.update(dt);
-  interactions.update(dt);
-  updateBall(dt);
-  renderer.render(scene, camera);
-});
+  const start = document.createElement("button");
+  start.textContent = "START";
+  start.setAttribute(
+    "style",
+    "padding:12px 48px;font-size:16px;font-weight:bold;border-radius:10px;" +
+      "border:0;background:#2c6fb0;color:#fff;cursor:pointer;font-family:inherit;",
+  );
+  start.addEventListener("click", () => {
+    start.disabled = true;
+    start.textContent = "STARTING...";
+    // Keep the URL shareable and reload-safe for the chosen platform.
+    const url = new URL(location.href);
+    url.searchParams.set(ENGINE_PARAM, selected);
+    history.replaceState(null, "", url);
+    boot(selected)
+      .then(() => overlay.remove())
+      .catch((error: unknown) => {
+        console.error("[playground] platform failed to start:", error);
+        start.disabled = false;
+        start.textContent = "START";
+        detected.textContent = `Failed to start ${MODES[selected].title} - see the console. Pick a platform and try again.`;
+        detected.style.color = "#ff9d7a";
+      });
+  });
+
+  overlay.append(heading, detected, cards, start);
+  container.appendChild(overlay);
+}
+
+if (choice.overridden && new URLSearchParams(location.search).get(AUTOSTART_PARAM) === "1") {
+  boot(choice.engine).catch((error: unknown) => {
+    console.error("[playground] platform failed to start:", error);
+    showLaunchScreen();
+  });
+} else {
+  showLaunchScreen();
+}

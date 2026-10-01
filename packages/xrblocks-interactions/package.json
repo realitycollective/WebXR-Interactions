@@ -10,7 +10,10 @@
     "threejs",
     "interaction",
     "input",
-    "typescript"
+    "typescript",
+    "physics",
+    "rapier",
+    "pointer"
   ],
   "license": "MIT",
   "author": "Reality Collective",
@@ -33,7 +36,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-input": "^0.1.7",
+    "@realitycollective/webxr-input": "^0.1.8",
     "@realitycollective/webxr-interactions": "^0.1.1-preview.4",
     "@realitycollective/threejs-interactions": "^0.1.1-preview.4"
   },

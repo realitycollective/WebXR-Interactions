@@ -24,6 +24,7 @@ export * from "./contract-cases.js";
 export * from "./gaze.js";
 export * from "./descriptor.js";
 export * from "./velocity-tracker.js";
+export * from "./release-velocity.js";
 export * from "./runtime.js";
 export * from "./pointer-bridge.js";
 export * from "./near-pointer.js";
@@ -31,6 +32,9 @@ export * from "./near-pointer-contract-cases.js";
 export * from "./physics.js";
 export * from "./physics-contract-cases.js";
 export * from "./memory-physics.js";
+export * from "./memory-ports.js";
+export * from "./trace.js";
+export * from "./trace-synthetic.js";
 
 export * from "./behaviours/behaviour.js";
 export * from "./behaviours/press.js";

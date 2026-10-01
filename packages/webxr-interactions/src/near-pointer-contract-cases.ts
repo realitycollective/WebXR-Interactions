@@ -266,6 +266,54 @@ const NEAR_POINTER_CASES: readonly NearPointerContractCase[] = [
     },
   },
   {
+    name: "a panel nearer than the object takes the ray, the object is not hovered, and the visuals name the panel",
+    run(subject) {
+      // IWSDK's MultiPointer runs over every pointer-event object, panels
+      // included; the UI Extensions hosts offer their panels to the same
+      // arbiter. Here a stand-in panel set offers a ray hit nearer than the
+      // target 1 m out.
+      const r = rig(subject);
+      const panels = r.runtime.getPointerArbiter().registerSet("panels", "panel");
+      panels.offer("right", "ray", { targetId: "info", point: [0, 1, -0.5], distance: 0.5 });
+      const types = r.frame({ ray: "at" });
+      expectActive(r, "ray", "a ray through a panel and an object behind it");
+      assert(!types.includes("hoverEnter"), "the object behind the panel must not be hovered");
+      const v = r.visuals[0]!;
+      assert(v.ray && v.cursor && v.targetKind === "panel" && v.targetId === "info", `the visuals must name the panel, got ${JSON.stringify(v)}`);
+      assert(Math.abs(v.hitDistance! - 0.5) < 1e-9, "the visuals carry the panel hit's distance");
+      panels.offer("right", "ray", null);
+      const after = r.frame({ ray: "at" });
+      assert(after.includes("hoverEnter"), "with the panel gone the object behind it is hovered");
+      assert(r.visuals[0]!.targetKind === "object", "the visuals name the object again");
+      panels.dispose();
+    },
+  },
+  {
+    name: "a fingertip on a panel retires the ray over an object, and a fingertip on an object retires the ray over a panel",
+    run(subject) {
+      const r = rig(subject);
+      const panels = r.runtime.getPointerArbiter().registerSet("panels", "panel");
+      r.frame({ ray: "at" });
+      expectActive(r, "ray", "the ray on the object");
+      panels.offer("right", "touch", { targetId: "info", point: [0.3, 1, -0.5], distance: 0.01 });
+      let types = r.frame({ ray: "at" });
+      expectActive(r, "touch", "a fingertip touching a panel while the ray is on an object");
+      assert(types.includes("hoverExit"), "the object under the ray loses its hover when the panel's touch takes the hand");
+      let v = r.visuals[0]!;
+      assert(!v.ray && v.cursor && v.targetKind === "panel", `the ray hides and the cursor sits on the panel, got ${JSON.stringify(v)}`);
+      panels.offer("right", "touch", null);
+      panels.offer("right", "ray", { targetId: "info", point: [0, 1, -0.5], distance: 0.5 });
+      r.frame({ ray: "at" });
+      expectActive(r, "ray", "the ray on the panel");
+      types = r.frame({ tip: outside(0.05), ray: "at" });
+      expectActive(r, "touch", "a fingertip touching the object while the ray is on a panel");
+      v = r.visuals[0]!;
+      assert(!v.ray && v.cursor && v.targetKind === "object" && v.targetId === "target", `the ray over the panel hides and the cursor sits on the object, got ${JSON.stringify(v)}`);
+      assert(types.includes("hoverEnter"), "the touched object is hovered");
+      panels.dispose();
+    },
+  },
+  {
     name: "a controller's ray origin presses by touch exactly as a fingertip does",
     run(subject) {
       const r = rig(subject);

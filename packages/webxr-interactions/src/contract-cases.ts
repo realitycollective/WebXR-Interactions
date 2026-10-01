@@ -166,6 +166,21 @@ const HIT_TESTER_CASES: readonly HitTesterContractCase[] = [
     },
   },
   {
+    name: "hitProximity's point is the surface point nearest the query point, never the centre",
+    run({ hitTester, driver }) {
+      // The touch cursor sits at this point (IWSDK's sphere intersector
+      // reports the point on the mesh). A host that answered with the centre
+      // put the cursor inside the object (Pale Signal handover, G7).
+      driver.place("target", [0, 0, -2], 0.1);
+      const hit = hitTester.hitProximity([0.13, 0, -2], 0.5);
+      assert(hit !== null, "a point 3 cm outside a 10 cm target must be found within 0.5 m");
+      assertVec3Close(hit.point, [0.1, 0, -2], 0.02, "the proximity point");
+      const above = hitTester.hitProximity([0, 0.15, -2], 0.5);
+      assert(above !== null, "a point 5 cm above the target must be found");
+      assertVec3Close(above.point, [0, 0.1, -2], 0.02, "the proximity point from above");
+    },
+  },
+  {
     name: "hitProximity misses a target whose surface is farther than the query radius",
     run({ hitTester, driver }) {
       driver.place("target", [0, 0, -2], 0.1);
