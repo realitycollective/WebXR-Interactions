@@ -4,6 +4,21 @@ Change log for the Reality Collective WebXR Interaction Extensions packages. All
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Preview builds are not listed separately. The entry for a version accumulates while its previews are published, and is dated when that version is released.
 
+## [0.1.2]
+
+### Changed
+
+- Development, tests and demos run on one shared copy of Meta's `super-three` fork at 0.185.0 (root `overrides`, with `@types/three` 0.185.4), the version every WebXR repository now uses, and on `@iwsdk/core` 1.0.1. IWSDK 1.0.1 changes no runtime code from 1.0.0. XR Blocks needs three r182 or later and logged an error on the r181 copy the demos used before. Published peer ranges are unchanged.
+- The playground chooses its platform by asking the browser's WebXR runtime which immersive modes it can start (`demos/playground/src/platform-choice.ts`). The user agent now only tells a Meta browser from any other.
+
+### Added
+
+- Playground diagnostics for framework testers, behind a hidden URL option: the on-device log and the report Pages Function of the UI Extensions lab, byte-identical (`demos/playground/src/diagnostics.ts`, `demos/playground/functions/api/report.ts`). `?log=1` records and sends by itself; `?log=local` keeps the log on the device; without the option nothing is recorded.
+
+### Fixed
+
+- Playground, XR Blocks on a browser that can enter XR (Android XR, XREAL Aura): XR Blocks' Enter XR button was unstyled and below the visible page, and the 2D view sat at floor level. The button is pinned at the bottom centre and the view raised to IWSDK's 1.7 m (`demos/playground/src/platforms/xrblocks-page.ts`).
+
 ## [0.1.1] - 2026-10-01
 
 ### Added

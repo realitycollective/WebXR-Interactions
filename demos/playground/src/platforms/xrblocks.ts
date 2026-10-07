@@ -4,7 +4,8 @@
  *
  * This file only creates the Script, builds the stations, and creates the
  * binding with the options every platform shares. The client pieces live in
- * `../client.ts`. XR Blocks draws its own Enter VR button.
+ * `../client.ts`. XR Blocks draws its own Enter XR button; `fitXRBlocksPage`
+ * keeps it on screen.
  */
 import type { Object3D } from "three";
 import * as horizonKit from "@pmndrs/uikit-horizon";
@@ -14,6 +15,7 @@ import { applyScene, connectUIExtensions, type UixWindowHost } from "@realitycol
 import { createClient, createPointers, registerAll, sharedPointers, wirePanelCopy, type PlaygroundClient } from "../client.js";
 import { PLAYGROUND_POINTER_DISPLAY, STATION_PANELS } from "../scene.js";
 import { buildStage, buildStations } from "../stations-three.js";
+import { fitXRBlocksPage, type XRBlocksPageCore } from "./xrblocks-page.js";
 
 class PlaygroundScript extends xb.Script {
   private panels?: UixWindowHost;
@@ -80,9 +82,8 @@ export async function boot(container: HTMLElement): Promise<void> {
   options.reticles.enabled = false;
   xb.add(new PlaygroundScript());
   await xb.init(options);
-  // XR Blocks appends its own root to <body>, after the full-height container, which puts the
-  // canvas below the visible page. Move it into the container, where every other platform draws.
-  const canvas = xb.core.renderer.domElement as HTMLCanvasElement;
-  const root = canvas.parentElement && canvas.parentElement !== document.body ? canvas.parentElement : canvas;
-  container.appendChild(root);
+  // XR Blocks appends its root and its Enter XR button to <body>, after the full-height container,
+  // which puts both below the visible page. Move them into the container, where every other
+  // platform draws, pin the button on screen and raise the 2D view to standing height.
+  fitXRBlocksPage(container, xb.core as unknown as XRBlocksPageCore);
 }

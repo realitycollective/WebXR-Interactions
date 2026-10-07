@@ -81,7 +81,7 @@ Poke targeting (`hitProximity`) is a sphere test on each registered object's wor
 
 ## Peer dependencies
 
-`three >= 0.170.0`. The Reality Collective demos pin the `super-three@0.181` fork that Meta's IWSDK mandates; stock three.js works equally well for this adapter.
+`three >= 0.170.0`. The Reality Collective demos pin Meta's `super-three` fork at 0.185.0, overriding the 0.181.0 that IWSDK pins so every engine shares one copy. Stock three.js works equally well for this adapter.
 
 `three-mesh-bvh >= 0.9.14`, optional. See the section above.
 

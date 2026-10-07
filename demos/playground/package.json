@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@babylonjs/core": "^9.28.0",
-    "@iwsdk/core": "1.0.0",
-    "@pmndrs/uikit-horizon": "^1.0.74",
+    "@iwsdk/core": "1.0.1",
+    "@pmndrs/uikit-horizon": "^1.0.76",
     "@realitycollective/babylon-interactions": "*",
     "@realitycollective/iwsdk-interactions": "*",
     "@realitycollective/iwsdk-uiextensions": "0.1.1",
@@ -21,7 +21,7 @@
     "@realitycollective/xrblocks-interactions": "*",
     "@realitycollective/xrblocks-uiextensions": "0.1.1",
     "lit": "^3.3.3",
-    "three": "npm:super-three@0.181.0",
+    "three": "npm:super-three@0.185.0",
     "three-pathfinding": "^1.3.0",
     "xrblocks": "^0.21.1"
   },
