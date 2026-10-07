@@ -2,16 +2,32 @@
  * Playground entry.
  *
  * One scene on IWSDK, three.js, XR Blocks and Babylon, with the same
- * registrations and the same client on each. This page detects the platform
- * from the user agent, pre-selects it on a launch screen, and boots nothing
- * until START is pressed. Each platform is a dynamic import, so a session only
- * downloads the engine it launches.
+ * registrations and the same client on each. This page asks the browser's
+ * WebXR runtime what it can do (`platform-choice.ts`), pre-selects a platform
+ * on a launch screen, and boots nothing until START is pressed. Each platform
+ * is a dynamic import, so a session only downloads the engine it launches.
+ *
+ * `?log=1`, a hidden option for framework testers, records diagnostics from
+ * the first line, before any platform loads, and sends them to the
+ * playground's report service (`diagnostics.ts`); `?log=local` keeps them on
+ * the device. Without it nothing is recorded.
  *
  * `?engine=iwsdk|threejs|xrblocks|babylon` pre-selects one. Adding
  * `&autostart=1` skips the launch screen and boots it at once.
  */
+import { installDiagnostics } from "./diagnostics.js";
+import { ENGINE_PARAM, chooseEngine, probeXRSupport, type Engine } from "./platform-choice.js";
 
-type Engine = "iwsdk" | "threejs" | "xrblocks" | "babylon";
+const AUTOSTART_PARAM = "autostart";
+const LOG_PARAM = "log";
+
+const diagnostics = installDiagnostics({
+  lab: "interactions-playground",
+  param: LOG_PARAM,
+  keepParams: [ENGINE_PARAM, AUTOSTART_PARAM, LOG_PARAM],
+  // The engine badge and the score line hold the top of this page.
+  corner: "bottom-right",
+});
 
 interface ModeInfo {
   title: string;
@@ -37,27 +53,9 @@ const MODES: Record<Engine, ModeInfo> = {
   },
 };
 
-const ENGINE_PARAM = "engine";
-const AUTOSTART_PARAM = "autostart";
-
-function isEngine(value: string | null): value is Engine {
-  return value !== null && value in MODES;
-}
-
-/** Pure chooser: the query string wins, then the user agent, then three.js. */
-function chooseEngine(userAgent: string, search: string): { engine: Engine; reason: string; overridden: boolean } {
-  const override = new URLSearchParams(search).get(ENGINE_PARAM);
-  if (isEngine(override)) return { engine: override, reason: `forced by ?${ENGINE_PARAM}=${override}`, overridden: true };
-  if (/OculusBrowser|Meta Quest|Horizon OS/i.test(userAgent)) {
-    return { engine: "iwsdk", reason: "Meta Horizon OS browser detected", overridden: false };
-  }
-  if (/Android\s?XR/i.test(userAgent)) {
-    return { engine: "xrblocks", reason: "Android XR browser detected", overridden: false };
-  }
-  return { engine: "threejs", reason: "no headset signature - plain three.js with mouse controls", overridden: false };
-}
-
-const choice = chooseEngine(navigator.userAgent, location.search);
+const xrSupport = await probeXRSupport();
+const choice = chooseEngine(navigator.userAgent, location.search, xrSupport);
+diagnostics.note(`engine pre-selected: ${choice.engine}`, { reason: choice.reason, overridden: choice.overridden, xrSupport });
 const container = document.getElementById("scene-container") as HTMLDivElement;
 
 async function boot(engine: Engine): Promise<void> {
@@ -66,6 +64,7 @@ async function boot(engine: Engine): Promise<void> {
     badge.textContent = `engine: ${engine} - ${MODES[engine].title}`;
     badge.style.display = "block";
   }
+  diagnostics.note(`booting the ${engine} platform`);
   switch (engine) {
     case "iwsdk":
       return (await import("./platforms/iwsdk.js")).boot(container);

@@ -44,7 +44,7 @@ Pass `xr`. Without it the adapter cannot see the session, so it keeps sampling w
 
 ## Known constraint
 
-xrblocks declares a peer of `three@^0.184` while Meta's IWSDK mandates the `super-three@0.181` fork. A bundler resolves a single `three` per bundle, so the pairing works in practice, but npm's peer check cannot express it - the Reality Collective workspaces set `legacy-peer-deps=true` for this reason.
+xrblocks 0.21 declares a peer of `three@^0.184` and logs an error below r182, while Meta's IWSDK 1.0 pins the `super-three@0.181.0` fork. The Reality Collective workspaces override both to one shared copy of `super-three@0.185.0`, which meets XR Blocks' r182 floor and which IWSDK runs unchanged. npm's peer check cannot express that override, so the workspaces set `legacy-peer-deps=true`. An app that installs this package picks its own `three`, and XR Blocks needs r182 or later.
 
 ## Peer dependency
 
