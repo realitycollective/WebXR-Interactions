@@ -8,8 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Every package requires `@realitycollective/webxr-input` at `^0.1.9`, the release of 8 October 2026, and the playground runs on UI Extensions `0.1.2-preview.1`. Both moved by `scripts/rc-dependencies.mjs --fix`; neither changes a contract the bindings rely on.
+- The "Publish to npm" workflow moves dependencies on other Reality Collective repositories before it packs. From `development` the dependency check runs `scripts/rc-dependencies.mjs --fix`: a newer version of another repository on npm, release or preview, is pinned, the lockfile is regenerated, the run installs, builds, tests and publishes against it, and the move is committed and pushed with the preview bump. Before, the check only failed the run and the move was a pull request by hand. From `main` the step still only checks, because `release.mjs prepare` has already moved every pin to the latest release.
 - Development, tests and demos run on one shared copy of Meta's `super-three` fork at 0.185.0 (root `overrides`, with `@types/three` 0.185.4), the version every WebXR repository now uses, and on `@iwsdk/core` 1.0.1. IWSDK 1.0.1 changes no runtime code from 1.0.0. XR Blocks needs three r182 or later and logged an error on the r181 copy the demos used before. Published peer ranges are unchanged.
 - The playground chooses its platform by asking the browser's WebXR runtime which immersive modes it can start (`demos/playground/src/platform-choice.ts`). The user agent now only tells a Meta browser from any other.
+- The playground is a Service Framework app on all four web platforms, with one app service every platform registers (`demos/playground/src/app-service.ts`). The framework's adapter owns the frame loop on three.js and Babylon and relays it on XR Blocks and IWSDK. The service reports the capabilities and the session state, and its `render()` ticks the binding, the panels and the client; on IWSDK those keep ticking from the World. The three.js Enter VR button asks the adapter for the session. The demo pins `@realitycollective/service-framework`, `service-framework-three`, `service-framework-iwsdk` and `service-framework-babylon` at 1.0.3-preview.1.
 
 ### Added
 

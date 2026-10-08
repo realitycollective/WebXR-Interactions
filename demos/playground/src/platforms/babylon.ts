@@ -9,6 +9,11 @@
  * station description panels are not shown on this platform and there is no
  * shared pointer arbiter to hand over: the runtime keeps its own. Babylon's
  * default XR experience draws its own Enter VR button.
+ *
+ * The Service Framework's `BabylonRuntimeAdapter` owns `engine.runRenderLoop`
+ * and follows the default XR experience's session. Each frame reaches the app
+ * service (`../app-service.ts`) as `renderTick`, and its `render()` runs the
+ * frame closure below.
  */
 import {
   Color3,
@@ -21,7 +26,10 @@ import {
   Vector3,
   WebXRFeatureName,
 } from "@babylonjs/core";
+import { ManualScheduler, ServiceManager } from "@realitycollective/service-framework";
+import { BabylonRuntimeAdapter } from "@realitycollective/service-framework-babylon";
 import { createBabylonInteractions } from "@realitycollective/babylon-interactions";
+import { createPlaygroundProfile, followPageVisibility, reportToConsole } from "../app-service.js";
 import { createClient, registerAll } from "../client.js";
 import { PLAYGROUND_POINTER_DISPLAY } from "../scene.js";
 import { buildBabylonStage, buildBabylonStations } from "../stations-babylon.js";
@@ -93,10 +101,27 @@ export async function boot(container: HTMLElement): Promise<void> {
   });
 
   addEventListener("resize", () => engine.resize());
-  engine.runRenderLoop(() => {
-    const dt = Math.min(0.1, engine.getDeltaTime() / 1000);
-    interactions.update(dt);
-    client.frame(dt);
-    scene.render();
-  });
+
+  // The Service Framework owns the render loop and follows the XR experience's
+  // session. Its experience type is structural and Babylon 9's own does not meet
+  // it (`enabledFeatures` may be undefined, and `WebXRCamera` has no
+  // `devicePosition`, which only `recentre()` reads), so it passes through `never`.
+  const scheduler = new ManualScheduler();
+  const manager = new ServiceManager({ scheduler });
+  const adapter = new BabylonRuntimeAdapter({ xr: (xr?.baseExperience ?? null) as never, host: engine, scheduler, manager });
+  manager.initializeProfile(
+    createPlaygroundProfile({
+      adapter,
+      report: reportToConsole,
+      frame: (deltaSeconds) => {
+        const dt = Math.min(0.1, deltaSeconds);
+        interactions.update(dt);
+        client.frame(dt);
+        scene.render();
+      },
+    }),
+  );
+  manager.start();
+  followPageVisibility(manager);
+  adapter.start();
 }

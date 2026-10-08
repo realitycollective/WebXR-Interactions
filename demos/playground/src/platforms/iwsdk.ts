@@ -6,6 +6,12 @@
  * `../client.ts`. IWSDK is three.js underneath, so the three.js station
  * builder is used as it is, and each part gets an entity that keeps its place
  * in the hierarchy.
+ *
+ * IWSDK owns its loop and its session, so the Service Framework relays frames
+ * here: `startServiceRuntime` builds the `IWSDKAdapter` and the manager, and the
+ * bridge system emits `renderTick` to the app service (`../app-service.ts`)
+ * while a session is visible. The Interactions and UI Extensions systems keep
+ * ticking from the World, as IWSDK apps ship them.
  */
 import {
   createSystem,
@@ -13,9 +19,11 @@ import {
   PokeInteractable,
   RayInteractable,
   SessionMode,
+  VisibilityState,
   World,
   type Entity,
 } from "@iwsdk/core";
+import { makeServiceBridgeSystem, startServiceRuntime } from "@realitycollective/service-framework-iwsdk";
 import { registerInteractions } from "@realitycollective/iwsdk-interactions";
 import {
   applyScene,
@@ -23,6 +31,7 @@ import {
   registerUIExtensions,
   uixComponentSet,
 } from "@realitycollective/iwsdk-uiextensions";
+import { createPlaygroundProfile, reportToConsole } from "../app-service.js";
 import { addEnterVrButton, createClient, createPointers, registerAll, sharedPointers, wirePanelCopy } from "../client.js";
 import { PLAYGROUND_POINTER_DISPLAY, STATION_PANELS, STATION_PARTS } from "../scene.js";
 import { buildStage, buildStations } from "../stations-three.js";
@@ -93,13 +102,35 @@ export async function boot(container: HTMLElement): Promise<void> {
     },
   });
 
-  // After the interaction bridge system has ticked the runtime.
+  // After the interaction bridge system has ticked the runtime. The client
+  // ticks from the World, not from the app service: the service bridge idles
+  // outside an immersive session, and the 2D mouse mode needs the ball's flight
+  // and the trace recorder too.
   class ClientFrameSystem extends createSystem() {
     override update(delta: number): void {
       client.frame(delta);
     }
   }
   world.registerSystem(ClientFrameSystem, { priority: 100 });
+
+  // The Service Framework relays IWSDK's frames. Every binding here ticks from
+  // the World, so the frame closure has nothing to do; the app service still
+  // reports the capabilities and the session. The bridge's IWSDK types are
+  // structural and @iwsdk/core's own do not meet them under this repo's strict
+  // options (`World.session` may be undefined, `createSystem` takes queries
+  // first, `registerSystem` wants the System statics), though they match at
+  // runtime, so the World, `createSystem` and the bridge pass through `never`.
+  const { manager, adapter } = startServiceRuntime(world as never, (adapter) =>
+    createPlaygroundProfile({ adapter, report: reportToConsole, frame: () => {} }),
+  );
+  const ServiceBridgeSystem = makeServiceBridgeSystem({
+    adapter,
+    manager,
+    world: world as never,
+    createSystem: createSystem as never,
+    visibleState: VisibilityState.Visible,
+  });
+  world.registerSystem(ServiceBridgeSystem as never);
 
   addEnterVrButton(async () => {
     await world.launchXR();
