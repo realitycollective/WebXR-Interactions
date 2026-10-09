@@ -12,11 +12,16 @@ The launch screen pre-selects a platform from what the browser's WebXR runtime a
 
 - `src/scene.ts`: the portable data only. The descriptor, the pointer display (`PLAYGROUND_POINTER_DISPLAY`), every station part with its shape, pose and colours (`STATION_PARTS`), the panels and their copy.
 - `src/stations-three.ts` and `src/stations-babylon.ts`: the two mesh builders over the same numbers.
-- `src/platforms/*.ts`: one file per platform that creates the engine scene, builds the stations and creates the binding with the shared options. Nothing else.
+- `src/platforms/*.ts`: one file per platform that creates the engine scene, builds the stations, creates the binding with the shared options and registers the app service. Nothing else.
+- `src/app-service.ts`: the Service Framework app service every platform registers. It reports the capabilities and the session, and runs the platform's frame closure on every `renderTick`.
 - `src/client.ts`: the client pieces every platform shares: audio blips from feedback intents, haptics routed to the provider, the dwell ring, toss ballistics on platforms without physics, the score line, the Enter VR button and the trace recorder.
 - `src/platform-choice.ts`: the launch screen's choice, from the WebXR runtime's answer.
 - `src/diagnostics.ts` and `functions/api/report.ts`: the on-device log and the Pages Function that receives a sent one. Both are byte-identical to the UI Extensions lab's copies.
 - `src/platforms/xrblocks-page.ts`: keeps XR Blocks' Enter XR button on screen and draws its 2D view from standing height, on a browser that can enter XR.
+
+## Service Framework
+
+The playground is a Service Framework app: every platform registers one app service, `PlaygroundAppService` (`src/app-service.ts`), with its runtime adapter and a frame closure. It logs the capabilities and each session change to the console with a `[playground]` prefix. `WebXRRuntimeAdapter` owns the loop and the Enter VR session on three.js, and `BabylonRuntimeAdapter` owns `engine.runRenderLoop` on Babylon. XR Blocks and IWSDK own their loops, so the XR Blocks Script calls the adapter's `tick()` and IWSDK's bridge system relays the World's frames. Each frame reaches the service as `renderTick`, and its `render()` ticks the Interactions binding, any UI Extensions panels and the client. On IWSDK they keep ticking from the World instead, because the bridge idles outside an immersive session.
 
 ## Diagnostics
 

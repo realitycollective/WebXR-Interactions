@@ -6,21 +6,28 @@
  * binding with the options every platform shares. The client pieces live in
  * `../client.ts`. XR Blocks draws its own Enter XR button; `fitXRBlocksPage`
  * keeps it on screen.
+ *
+ * XR Blocks owns its animation loop, so the Service Framework's
+ * `WebXRRuntimeAdapter` is given no host and never started. The Script's
+ * `update()` drives the adapter's step by hand, which reaches the app service
+ * (`../app-service.ts`) as `renderTick`, and its `render()` runs the frame
+ * closure that ticks the panels, the binding and the client.
  */
 import type { Object3D } from "three";
 import * as horizonKit from "@pmndrs/uikit-horizon";
 import * as xb from "xrblocks";
+import { ManualScheduler, ServiceManager } from "@realitycollective/service-framework";
+import { WebXRRuntimeAdapter } from "@realitycollective/service-framework-three";
 import { connectXRBlocksInteractions, type XRBlocksInteractions } from "@realitycollective/xrblocks-interactions";
 import { applyScene, connectUIExtensions, type UixWindowHost } from "@realitycollective/xrblocks-uiextensions";
-import { createClient, createPointers, registerAll, sharedPointers, wirePanelCopy, type PlaygroundClient } from "../client.js";
+import { createPlaygroundProfile, followPageVisibility, reportToConsole } from "../app-service.js";
+import { createClient, createPointers, registerAll, sharedPointers, wirePanelCopy } from "../client.js";
 import { PLAYGROUND_POINTER_DISPLAY, STATION_PANELS } from "../scene.js";
 import { buildStage, buildStations } from "../stations-three.js";
 import { fitXRBlocksPage, type XRBlocksPageCore } from "./xrblocks-page.js";
 
 class PlaygroundScript extends xb.Script {
-  private panels?: UixWindowHost;
-  private interactions?: XRBlocksInteractions;
-  private client?: PlaygroundClient;
+  private adapter?: WebXRRuntimeAdapter;
 
   override async init(): Promise<void> {
     // xrblocks bundles its own three type declarations; at runtime one `three`
@@ -36,11 +43,11 @@ class PlaygroundScript extends xb.Script {
 
     // One arbiter for the panels and the interactables.
     const pointers = createPointers();
-    this.panels = connectUIExtensions(sharedPointers({ scene: root, camera, xr, input, kit: horizonKit as never }, pointers));
-    wirePanelCopy(this.panels);
-    applyScene(this.panels, STATION_PANELS);
+    const panels: UixWindowHost = connectUIExtensions(sharedPointers({ scene: root, camera, xr, input, kit: horizonKit as never }, pointers));
+    wirePanelCopy(panels);
+    applyScene(panels, STATION_PANELS);
 
-    const interactions = connectXRBlocksInteractions({
+    const interactions: XRBlocksInteractions = connectXRBlocksInteractions({
       input,
       camera,
       xr,
@@ -48,11 +55,10 @@ class PlaygroundScript extends xb.Script {
       pointerDisplay: PLAYGROUND_POINTER_DISPLAY,
       pointerVisuals: { scene: root },
     });
-    this.interactions = interactions;
     registerAll(stations.objects, (descriptor, object) => interactions.register(descriptor, object));
 
     const ball = stations.objects.get("pg-ball")!;
-    this.client = createClient({
+    const client = createClient({
       platform: "xrblocks",
       binding: interactions,
       setDwellProgress: (progress) => stations.dwellRing.scale.setScalar(progress),
@@ -66,13 +72,33 @@ class PlaygroundScript extends xb.Script {
         resetOrientation: () => ball.quaternion.identity(),
       },
     });
+
+    // The Service Framework relays XR Blocks' frames: no host, no start(), the
+    // adapter only follows the session XR Blocks presents. The DOM's optional
+    // `enabledFeatures` does not meet the adapter's structural session type under
+    // this repo's strict options, though it matches at runtime, hence `never`.
+    const scheduler = new ManualScheduler();
+    const manager = new ServiceManager({ scheduler });
+    const adapter = new WebXRRuntimeAdapter({ xr, xrSystem: (navigator.xr ?? null) as never, scheduler, manager });
+    manager.initializeProfile(
+      createPlaygroundProfile({
+        adapter,
+        report: reportToConsole,
+        frame: (deltaSeconds) => {
+          const dt = Math.min(0.1, deltaSeconds);
+          panels.update(dt);
+          interactions.update(dt);
+          client.frame(dt);
+        },
+      }),
+    );
+    manager.start();
+    followPageVisibility(manager);
+    this.adapter = adapter;
   }
 
   override update(): void {
-    const dt = Math.min(0.1, xb.getDeltaTime());
-    this.panels?.update(dt);
-    this.interactions?.update(dt);
-    this.client?.frame(dt);
+    this.adapter?.tick(performance.now());
   }
 }
 
